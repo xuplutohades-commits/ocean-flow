@@ -139,13 +139,6 @@ function spawnParticle(ff: FlowField, rnd: () => number, freshAge: boolean): Flo
 
 /** 尾迹淡出的目标色调：等离子流拖尾逐渐溶入深海水色 */
 const DEEP_TONE: [number, number, number] = [0.05, 0.14, 0.24];
-/** WebGL 顶点色按线性空间解释：写入前 sRGB→线性，否则颜色会被输出转换冲淡（只影响色彩，不影响线条形态） */
-function srgbToLin(v: number): number {
-  return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
-}
-const WARM_LIN: [number, number, number] = WARM.map(srgbToLin) as [number, number, number];
-const COLD_LIN: [number, number, number] = COLD.map(srgbToLin) as [number, number, number];
-const DEEP_LIN: [number, number, number] = DEEP_TONE.map(srgbToLin) as [number, number, number];
 
 /**
  * 全球洋流平流粒子场：
@@ -285,7 +278,7 @@ function CurrentFlow() {
       // 6) 写入顶点：段间 alpha 渐变、头亮尾淡
       const o = i * segV;
       const tint = 0.9 + 0.1 * Math.sin(it.seed * 1.7);
-      const base = ff.warm ? WARM_LIN : COLD_LIN;
+      const base = ff.warm ? WARM : COLD;
       for (let kk = 0; kk < TRAIL_N - 1; kk++) {
         const va = it.trail[kk];
         const vb = it.trail[kk + 1];
@@ -298,12 +291,12 @@ function CurrentFlow() {
         const cfB = (0.45 + 0.55 * wB) * tint;
         const eA = wA * alpha; // 有效透明度：淡出端向海面色调靠拢
         const eB = wB * alpha;
-        col[vx] = base[0] * cfA * eA + DEEP_LIN[0] * (1 - eA);
-        col[vx + 1] = base[1] * cfA * eA + DEEP_LIN[1] * (1 - eA);
-        col[vx + 2] = base[2] * cfA * eA + DEEP_LIN[2] * (1 - eA);
-        col[vx + 3] = base[0] * cfB * eB + DEEP_LIN[0] * (1 - eB);
-        col[vx + 4] = base[1] * cfB * eB + DEEP_LIN[1] * (1 - eB);
-        col[vx + 5] = base[2] * cfB * eB + DEEP_LIN[2] * (1 - eB);
+        col[vx] = base[0] * cfA * eA + DEEP_TONE[0] * (1 - eA);
+        col[vx + 1] = base[1] * cfA * eA + DEEP_TONE[1] * (1 - eA);
+        col[vx + 2] = base[2] * cfA * eA + DEEP_TONE[2] * (1 - eA);
+        col[vx + 3] = base[0] * cfB * eB + DEEP_TONE[0] * (1 - eB);
+        col[vx + 4] = base[1] * cfB * eB + DEEP_TONE[1] * (1 - eB);
+        col[vx + 5] = base[2] * cfB * eB + DEEP_TONE[2] * (1 - eB);
       }
     }
     posAttr.needsUpdate = true;
