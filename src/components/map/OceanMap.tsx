@@ -1184,10 +1184,29 @@ export const OceanMap = forwardRef<OceanMapHandle, OceanMapProps>(function Ocean
       const r = wrap.getBoundingClientRect();
       const x = e.clientX - r.left;
       const y = e.clientY - r.top;
-      // 触控板双指缩放事件带 ctrlKey，灵敏度更高；普通滚轮 3.5x 提速
-      const k = e.ctrlKey ? 0.007 : 0.0038;
+      // ctrlKey 事件是 Chrome/Edge 触控板双指缩放的投递方式，普通滚轮/触控板滚动同一通道
+      const k = e.ctrlKey ? 0.006 : 0.0042;
       engine.zoomBy(Math.exp(-e.deltaY * k), x, y);
     };
+    // Safari 触控板双指缩放走 GestureEvent（累积 scale），逐帧换算成增量缩放
+    let lastGestureScale = 1;
+    const onGestureStart = (e: Event) => {
+      const ge = e as unknown as { scale?: number };
+      if (typeof ge.scale === 'number') {
+        e.preventDefault();
+        lastGestureScale = 1;
+      }
+    };
+    const onGestureChange = (e: Event) => {
+      const ge = e as unknown as { scale?: number };
+      if (typeof ge.scale !== 'number' || !(ge.scale > 0) || ge.scale === lastGestureScale) return;
+      e.preventDefault();
+      const r = wrap.getBoundingClientRect();
+      engine.zoomBy(ge.scale / lastGestureScale, r.width / 2, r.height / 2);
+      lastGestureScale = ge.scale;
+    };
+    // 触屏设备：禁止浏览器原生页面缩放，全部交给地图
+    wrap.style.touchAction = 'none';
     const onDown = (e: PointerEvent) => {
       const r = wrap.getBoundingClientRect();
       engine.pointerDown(e.clientX - r.left, e.clientY - r.top);
@@ -1227,9 +1246,13 @@ export const OceanMap = forwardRef<OceanMapHandle, OceanMapProps>(function Ocean
     canvas.addEventListener('pointerup', onUp);
     canvas.addEventListener('click', onClick);
     canvas.addEventListener('dblclick', onDbl);
+    wrap.addEventListener('gesturestart', onGestureStart);
+    wrap.addEventListener('gesturechange', onGestureChange);
 
     const ro2 = new ResizeObserver(() => {});
     return () => {
+      wrap.removeEventListener('gesturestart', onGestureStart);
+      wrap.removeEventListener('gesturechange', onGestureChange);
       engine.dispose();
       ro.disconnect();
       ro2.disconnect();
