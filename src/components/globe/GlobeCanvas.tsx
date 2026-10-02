@@ -40,13 +40,19 @@ const DEG2RAD = Math.PI / 180;
  * 流速系数与颜色；粒子在局部速度场里被平流，留下渐变的尾迹。
  * 视觉：柔软、有宽度、持续流动的“海流带”，而不是短线群。
  */
-const TRAIL_N = 7;                                            // 每粒子尾迹点数
-const TRAIL_W: number[] = [0.05, 0.13, 0.23, 0.35, 0.52, 0.74, 1.0]; // 尾→头 alpha 权重
-const TRAIL_STEP = 9;                                         // 每 N 帧记录一个尾迹点
+const TRAIL_N = 8;                                            // 每粒子尾迹点数
+const TRAIL_W: number[] = [0.04, 0.1, 0.19, 0.31, 0.46, 0.63, 0.82, 1.0]; // 尾→头 alpha 权重
+const TRAIL_STEP = 7;                                         // 每 N 帧记录一个尾迹点
 const CORE_SPEED_DEG = 1.3;                                   // 核心带参考流速 °/s
 const PARTICLE_LIMIT = 9000;
-const WARM: [number, number, number] = [1.0, 0.58, 0.28];     // 柔和的暖橙金
-const COLD: [number, number, number] = [0.45, 0.75, 1.0];     // 柔和的蓝青
+const WARM: [number, number, number] = [1.0, 0.62, 0.3];      // 柔和的暖橙金
+const COLD: [number, number, number] = [0.5, 0.78, 1.0];      // 柔和的蓝青
+// WebGL 顶点色按线性空间解释；写入前做 sRGB→线性转换，保证屏幕上呈现原本的暖/冷色相
+function srgbToLin(v: number): number {
+  return v <= 0.04045 ? v / 12.92 : Math.pow((v + 0.055) / 1.055, 2.4);
+}
+const WARM_LIN: [number, number, number] = WARM.map(srgbToLin) as [number, number, number];
+const COLD_LIN: [number, number, number] = COLD.map(srgbToLin) as [number, number, number];
 
 /** 洋流中心线片段：单位球面上的位置 + 流向切向量 */
 interface FieldSeg {
@@ -139,6 +145,8 @@ function spawnParticle(ff: FlowField, rnd: () => number, freshAge: boolean): Flo
 
 /** 尾迹淡出的目标色调：等离子流拖尾逐渐溶入深海水色 */
 const DEEP_TONE: [number, number, number] = [0.05, 0.14, 0.24];
+/** 深海混色目标色的线性版本（WebGL 顶点色按线性空间解释） */
+const DEEP_LIN2: [number, number, number] = DEEP_TONE.map(srgbToLin) as [number, number, number];
 
 /**
  * 全球洋流平流粒子场：
@@ -181,8 +189,43 @@ function CurrentFlow() {
       new THREE.LineBasicMaterial({
         vertexColors: true,
         transparent: true,
-        opacity: 0.95,
+        opacity: 0.45,
         depthWrite: false,
+        depthTest: true,
+        blending: THREE.AdditiveBlending,
+      }),
+    [],
+  );
+
+  // 发光圆点层：每粒子 3 个渐暗圆点成一短串，普通混合保持暖/冷色相，
+  // 叠加在明亮自然色海面上也能一眼看到（全部为内置材质，规避自定义着色器兼容风险）
+  const DOT_N = 3;
+  const ptPosAttr = useMemo(() => {
+    const a = new THREE.BufferAttribute(new Float32Array(items.length * DOT_N * 3), 3);
+    a.setUsage(THREE.DynamicDrawUsage);
+    return a;
+  }, [items]);
+  const ptColAttr = useMemo(
+    () => new THREE.BufferAttribute(new Float32Array(items.length * DOT_N * 3), 3),
+    [items],
+  );
+  const ptGeo = useMemo(() => {
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', ptPosAttr);
+    g.setAttribute('color', ptColAttr);
+    return g;
+  }, [ptPosAttr, ptColAttr]);
+  const ptMat = useMemo(
+    () =>
+      new THREE.PointsMaterial({
+        size: 8,
+        sizeAttenuation: false,
+        vertexColors: true,
+        transparent: true,
+        opacity: 1,
+        depthWrite: false,
+        depthTest: true,
+        blending: THREE.NormalBlending,
       }),
     [],
   );
@@ -196,6 +239,8 @@ function CurrentFlow() {
     if (!items.length) return;
     const pos = posAttr.array as Float32Array;
     const col = colAttr.array as Float32Array;
+    const ptPos = ptPosAttr.array as Float32Array;
+    const ptCol = ptColAttr.array as Float32Array;
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
       const ff = it.ff;
@@ -249,7 +294,8 @@ function CurrentFlow() {
       const fi = Math.min(1, it.age / 1.1);
       const fo = Math.min(1, (it.life - it.age) / 2.4);
       const f = Math.max(0, Math.min(fi, fo));
-      const alpha = it.opacity * (0.45 + 0.55 * w) * f;
+      // 亮度下限提高：明亮的流带头 + 渐隐尾，叠加在自然色海面上依然清晰可见
+      const alpha = Math.min(1, it.opacity * (0.72 + 0.5 * w) * f);
 
       // 4) 尾迹记录
       it.step += 1;
@@ -278,7 +324,7 @@ function CurrentFlow() {
       // 6) 写入顶点：段间 alpha 渐变、头亮尾淡
       const o = i * segV;
       const tint = 0.9 + 0.1 * Math.sin(it.seed * 1.7);
-      const base = ff.warm ? WARM : COLD;
+      const base = ff.warm ? WARM_LIN : COLD_LIN;
       for (let kk = 0; kk < TRAIL_N - 1; kk++) {
         const va = it.trail[kk];
         const vb = it.trail[kk + 1];
@@ -287,23 +333,45 @@ function CurrentFlow() {
         pos[vx + 3] = vb.x; pos[vx + 4] = vb.y; pos[vx + 5] = vb.z;
         const wA = TRAIL_W[kk];
         const wB = TRAIL_W[kk + 1];
-        const cfA = (0.45 + 0.55 * wA) * tint;
-        const cfB = (0.45 + 0.55 * wB) * tint;
-        const eA = wA * alpha; // 有效透明度：淡出端向海面色调靠拢
-        const eB = wB * alpha;
-        col[vx] = base[0] * cfA * eA + DEEP_TONE[0] * (1 - eA);
-        col[vx + 1] = base[1] * cfA * eA + DEEP_TONE[1] * (1 - eA);
-        col[vx + 2] = base[2] * cfA * eA + DEEP_TONE[2] * (1 - eA);
-        col[vx + 3] = base[0] * cfB * eB + DEEP_TONE[0] * (1 - eB);
-        col[vx + 4] = base[1] * cfB * eB + DEEP_TONE[1] * (1 - eB);
-        col[vx + 5] = base[2] * cfB * eB + DEEP_TONE[2] * (1 - eB);
+        const brA = Math.min(1, alpha * (0.38 + 0.62 * Math.pow(wA, 0.75))); // 颜色保留度：头≈1，尾更低但不全暗
+        const brB = Math.min(1, alpha * (0.38 + 0.62 * Math.pow(wB, 0.75)));
+        col[vx] = base[0] * tint * brA + DEEP_LIN2[0] * (1 - brA);
+        col[vx + 1] = base[1] * tint * brA + DEEP_LIN2[1] * (1 - brA);
+        col[vx + 2] = base[2] * tint * brA + DEEP_LIN2[2] * (1 - brA);
+        col[vx + 3] = base[0] * tint * brB + DEEP_LIN2[0] * (1 - brB);
+        col[vx + 4] = base[1] * tint * brB + DEEP_LIN2[1] * (1 - brB);
+        col[vx + 5] = base[2] * tint * brB + DEEP_LIN2[2] * (1 - brB);
+      }
+
+      // 7) 发光圆点短串：头最亮、后两点渐暗，色相保持暖/冷本色
+      const pq = i * DOT_N * 3;
+      const dotIdx: number[] = [TRAIL_N - 1, Math.max(0, TRAIL_N - 3), Math.max(0, TRAIL_N - 5)];
+      const dotStren: number[] = [1.0, 0.66, 0.38];
+      const sHead = Math.min(1, alpha + 0.25);
+      for (let k = 0; k < DOT_N; k++) {
+        const tp = it.trail[dotIdx[k]];
+        const oq = pq + k * 3;
+        ptPos[oq] = tp.x; ptPos[oq + 1] = tp.y; ptPos[oq + 2] = tp.z;
+        const s = dotStren[k] * sHead;
+        // 头部圆点用纯暖/冷色相；中尾点按比例变暗（向深海水色靠拢）
+        const mix = k === 0 ? 0 : s;
+        ptCol[oq] = base[0] * tint * (k === 0 ? 1 : s) + DEEP_LIN2[0] * mix;
+        ptCol[oq + 1] = base[1] * tint * (k === 0 ? 1 : s) + DEEP_LIN2[1] * mix;
+        ptCol[oq + 2] = base[2] * tint * (k === 0 ? 1 : s) + DEEP_LIN2[2] * mix;
       }
     }
     posAttr.needsUpdate = true;
     colAttr.needsUpdate = true;
+    ptPosAttr.needsUpdate = true;
+    ptColAttr.needsUpdate = true;
   });
 
-  return <lineSegments geometry={geo} material={mat} frustumCulled={false} />;
+  return (
+    <>
+      <lineSegments geometry={geo} material={mat} frustumCulled={false} renderOrder={1} />
+      <points geometry={ptGeo} material={ptMat} frustumCulled={false} renderOrder={2} />
+    </>
+  );
 }
 
 function SunGlint() {
