@@ -51,7 +51,7 @@ export interface OceanMapProps {
   style?: React.CSSProperties;
   dimUnselected?: boolean;
   labelsOnlySelected?: boolean;
-  /** Ventusky 风格：沿洋流绘制清晰的实心方向箭头（默认开启） */
+  /** 流动粒子层（默认开启；兼容旧版本 prop 名，不再绘制方向箭头） */
   showArrows?: boolean;
   pollute?: PollutionSource[];
   floatCount?: number;
@@ -59,12 +59,23 @@ export interface OceanMapProps {
 
 /* ───────────────────────── 引擎 ───────────────────────── */
 
-interface FlowParticle {
-  sp: SampledPath;
-  s: number;
-  speed: number;
+interface FlowDot {
+  x: number;
+  y: number;
+  age: number;
+  life: number;
+  len: number;
+  width: number;
+  warm: boolean;
   seed: number;
-  trail: { x: number; y: number }[];
+}
+
+interface FlowSegment {
+  x1: number; y1: number;
+  x2: number; y2: number;
+  tx: number; ty: number;
+  span: number;
+  warm: boolean;
 }
 
 interface Tracker {
@@ -129,13 +140,17 @@ class MapEngine {
   view: View = { lng0: -180, lat0: 90, scale: 3 };
   target: View | null = null;
   animT = 0;
-  particles: FlowParticle[] = [];
+  flowDots: FlowDot[] = [];
+  fieldSegs: FlowSegment[] = [];
+  fieldGrid = new Map<number, number[]>();
+  fieldCell = 56;
+  fieldKey = '';
+  spawnPool: { sp: SampledPath; warm: boolean; span: number; cum: number }[] = [];
   trackers: Tracker[] = [];
   dots: OverlayDot[] = [];
   pollutionSources: PollutionSource[] = [];
   pollAccum: Record<string, number> = {};
   hovered: string | null = null;
-  arrowGrid: { sp: SampledPath; ss: number[]; c: OceanCurrent }[] = [];
   land: { x: number; y: number }[][] = [];
   landReady = false;
   raf = 0;
@@ -172,6 +187,7 @@ class MapEngine {
     this.base.height = Math.round(h * this.dpr);
     this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     this.redrawBase();
+    this.rebuildField();
   }
 
   fitWorld(): View {
@@ -270,44 +286,15 @@ class MapEngine {
   }
 
   buildParticles() {
-    const ids = this.opts.currentIds?.length ? this.opts.currentIds : CURRENTS.map((c) => c.id);
-    const season = this.opts.season ?? 'summer';
+    this.rebuildField();
     const dense = this.opts.dense ?? 1;
-    this.buildArrowGrid();
-    this.particles = [];
-    for (const id of ids) {
-      const c = CURRENT_MAP[id];
-      if (!c) continue;
-      const sp = samplePath(pathOf(c, season), 0.5);
-      const n = clamp(Math.round((sp.total / 3.2) * dense), 8, 170);
-      for (let i = 0; i < n; i++) {
-        this.particles.push({
-          sp,
-          s: Math.random() * sp.total,
-          speed: (0.55 + Math.random() * 0.45) * (sp.total / 46),
-          seed: Math.random() * 100,
-          trail: [],
-        });
-      }
-    }
+    const target = Math.round(Math.min(3400, Math.max(650, (this.w * this.h) / 480)) * dense);
+    const dots = this.flowDots;
+    if (dots.length > target) dots.length = target;
+    else while (dots.length < target) dots.push(this.spawnDot());
   }
 
   setPathSeason() { this.buildParticles(); }
-
-  buildArrowGrid() {
-    const ids = this.opts.currentIds?.length ? this.opts.currentIds : CURRENTS.map((c) => c.id);
-    const season = this.opts.season ?? 'summer';
-    const step = 7; // 度（沿路径）
-    this.arrowGrid = [];
-    for (const id of ids) {
-      const c = CURRENT_MAP[id];
-      if (!c) continue;
-      const sp = samplePathCache(c, season);
-      const ss: number[] = [];
-      for (let x = 0; x < sp.total; x += step) ss.push(x);
-      if (ss.length) this.arrowGrid.push({ sp, ss, c });
-    }
-  }
 
   focus(id?: string | null) {
     const c = id ? CURRENT_MAP[id] : null;
@@ -465,11 +452,8 @@ class MapEngine {
     // 洋流带底层（半透明路径）
     this.drawCurrentBands(ctx, w, h);
 
-    // Ventusky 式方向箭头
-    this.drawArrows(ctx, w, h);
-
-    // 流动虚线流线（Ventusky / earth.nullschool 式：一节一节短段沿流向流动）
-    this.drawStreams(ctx, w, h, speedMul);
+    // Ventusky 式粒子流场：大量短促半透明流线粒子沿矢量场运动
+    this.drawFlowField(ctx, w, h, speedMul, dt);
 
     // 污染扩散点
     for (let i = this.dots.length - 1; i >= 0; i--) {
@@ -606,133 +590,195 @@ class MapEngine {
     this.raf = requestAnimationFrame((n) => this.tick(n));
   }
 
-  currentIdOf(p: FlowParticle): string {
-    // 粒子对应的洋流：通过 sp 查找（引擎内维护 id 映射）
-    return this.sampleOwner.get(p.sp)?.id ?? 'kuroshio';
-  }
   currentOfSample(sp: SampledPath): OceanCurrent | undefined {
     return this.sampleOwner.get(sp);
   }
 
   sampleOwner = new Map<SampledPath, OceanCurrent>();
 
-  /** 沿屏幕距离取折线坐标（二分查找，插值） */
-  atScreen(cum: number[], xs: number[], ys: number[], d: number): [number, number] | null {
-    if (d <= cum[0]) return [xs[0], ys[0]];
-    if (d >= cum[cum.length - 1]) return [xs[xs.length - 1], ys[ys.length - 1]];
-    let lo = 0;
-    let hi = cum.length - 1;
-    while (hi - lo > 1) {
-      const mid = (lo + hi) >> 1;
-      if (cum[mid] <= d) lo = mid;
-      else hi = mid;
-    }
-    const denom = cum[hi] - cum[lo] || 1;
-    const t = (d - cum[lo]) / denom;
-    return [xs[lo] + (xs[hi] - xs[lo]) * t, ys[lo] + (ys[hi] - ys[lo]) * t];
+  /** 流场缓存键：视窗变化超过阈值才重建（拖动/缩放/聚焦动画期间自动重建） */
+  fieldCacheKey(): string {
+    const s = this.view.scale;
+    return (
+      this.w + 'x' + this.h + '|' +
+      Math.round(s * 50) + '|' +
+      Math.round((this.view.lng0 * s) / 3) + '|' +
+      Math.round((this.view.lat0 * s) / 3)
+    );
   }
 
-  /** Ventusky 式“流动虚线”：沿每条洋流点列一节一节短线段，随时间向流向移动 */
-  drawStreams(ctx: CanvasRenderingContext2D, w: number, h: number, speedMul: number) {
-    const dense = this.opts.dense ?? 1;
-    const dashPx = clamp(8 * dense, 6, 24);
-    const gapPx = clamp(16 * dense, 12, 40);
-    const period = dashPx + gapPx;
-    const speed = (this.opts.speed ?? 1) * speedMul * 42; // px/s
-    for (let gi = 0; gi < this.arrowGrid.length; gi++) {
-      const { sp, c } = this.arrowGrid[gi];
-      const col = tCol(c.type === 'warm');
-      const xs: number[] = [];
-      const ys: number[] = [];
-      const cum: number[] = [0];
-      for (let i = 0; i < sp.pts.length; i++) {
-        const [px, py] = this.proj(sp.pts[i][0], sp.pts[i][1]);
-        xs.push(px);
-        ys.push(py);
-        if (i > 0) cum.push(cum[i - 1] + Math.hypot(px - xs[i - 1], py - ys[i - 1]));
-      }
-      const total = cum[cum.length - 1];
-      if (total < dashPx) continue;
-      const phase = (this.time * speed) % period;
-      ctx.lineCap = 'round';
-      ctx.lineJoin = 'round';
-      for (let start = phase - period; start < total + dashPx; start += period) {
-        if (start + dashPx < 0) continue;
-        const s0 = Math.max(0, start);
-        const s1 = Math.min(total, start + dashPx);
-        const a = this.atScreen(cum, xs, ys, s0);
-        const bPt = this.atScreen(cum, xs, ys, s1);
-        if (!a || !bPt) continue;
-        const mx = (a[0] + bPt[0]) / 2;
-        const my = (a[1] + bPt[1]) / 2;
-        ctx.strokeStyle = col;
-        ctx.lineWidth = 2.4;
-        // 头亮尾淡：形成拖尾感
-        ctx.globalAlpha = 0.34;
-        ctx.beginPath();
-        ctx.moveTo(mx, my);
-        ctx.lineTo(bPt[0], bPt[1]);
-        ctx.stroke();
-        ctx.globalAlpha = 0.92;
-        ctx.beginPath();
-        ctx.moveTo(a[0], a[1]);
-        ctx.lineTo(mx, my);
-        ctx.stroke();
-      }
-    }
-    ctx.globalAlpha = 1;
-  }
-
-  drawArrows(ctx: CanvasRenderingContext2D, w: number, h: number) {
-    if ((this.opts.showArrows ?? true) === false) return;
+  /** 由洋流路径构建二维矢量场（屏幕空间）：路径细分为线段，落入空间网格 */
+  rebuildField() {
+    const { w, h } = this;
     const season = this.opts.season ?? 'summer';
-    const time = this.time;
-    for (let gi = 0; gi < this.arrowGrid.length; gi++) {
-      const { sp, ss, c } = this.arrowGrid[gi];
-      const col = tCol(c.type === 'warm');
-      const stem = clamp(this.view.scale * 0.6, 9, 21);
-      for (let k = 0; k < ss.length; k++) {
-        const s0 = ss[k];
-        const [lng, lat] = pointAt(sp, s0);
-        const [lng2, lat2] = pointAt(sp, Math.min(sp.total, s0 + 1.4));
-        const [x1, y1] = this.proj(lng, lat);
-        const [x2, y2] = this.proj(lng2, lat2);
-        if (x1 < -60 || x1 > w + 60 || y1 < -60 || y1 > h + 60) continue;
+    const ids = this.opts.currentIds?.length ? this.opts.currentIds : CURRENTS.map((c) => c.id);
+    const segs: FlowSegment[] = [];
+    const pool: { sp: SampledPath; warm: boolean; span: number; cum: number }[] = [];
+    let acc = 0;
+    for (const id of ids) {
+      const c = CURRENT_MAP[id];
+      if (!c) continue;
+      const sp = samplePathCache(c, season);
+      const span = c.width ?? 1;
+      const warm = c.type === 'warm';
+      for (let i = 0; i < sp.pts.length - 1; i++) {
+        const [x1, y1] = this.proj(sp.pts[i][0], sp.pts[i][1]);
+        const [x2, y2] = this.proj(sp.pts[i + 1][0], sp.pts[i + 1][1]);
+        if ((x1 < -90 && x2 < -90) || (x1 > w + 90 && x2 > w + 90)) continue;
+        if ((y1 < -90 && y2 < -90) || (y1 > h + 90 && y2 > h + 90)) continue;
         const dx = x2 - x1;
         const dy = y2 - y1;
         const len = Math.hypot(dx, dy) || 1;
-        const ux = dx / len;
-        const uy = dy / len;
-        const px = -uy;
-        const py = ux;
-        const half = stem * 0.66;
-        const pulse = 0.8 + 0.2 * Math.sin(time * 1.8 + gi * 0.83 + k * 0.29);
-        ctx.globalAlpha = pulse;
-        // 实心箭头头（白描边，亮底高对比）
-        const tx = x1 + ux * stem * 1.6;
-        const ty = y1 + uy * stem * 1.6;
-        ctx.lineJoin = 'round';
-        ctx.beginPath();
-        ctx.moveTo(tx, ty);
-        ctx.lineTo(x1 + ux * stem * 0.5 + px * half, y1 + uy * stem * 0.5 + py * half);
-        ctx.lineTo(x1 + ux * stem * 0.5 - px * half, y1 + uy * stem * 0.5 - py * half);
-        ctx.closePath();
-        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
-        ctx.lineWidth = 1.4;
-        ctx.stroke();
-        ctx.fillStyle = col;
-        ctx.fill();
-        // 箭杆
-        ctx.strokeStyle = col;
-        ctx.lineWidth = 2.2;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(x1 - ux * stem * 1.2, y1 - uy * stem * 1.2);
-        ctx.lineTo(x1 + ux * stem * 0.3, y1 + uy * stem * 0.3);
-        ctx.stroke();
+        segs.push({ x1, y1, x2, y2, tx: dx / len, ty: dy / len, span, warm });
+      }
+      acc += sp.total;
+      pool.push({ sp, warm, span, cum: acc });
+    }
+    this.fieldCell = 56;
+    this.fieldSegs = segs;
+    this.spawnPool = pool;
+    this.fieldGrid.clear();
+    const cell = this.fieldCell;
+    for (let i = 0; i < segs.length; i++) {
+      const s = segs[i];
+      const cx0 = Math.floor(Math.min(s.x1, s.x2) / cell);
+      const cx1 = Math.floor(Math.max(s.x1, s.x2) / cell);
+      const cy0 = Math.floor(Math.min(s.y1, s.y2) / cell);
+      const cy1 = Math.floor(Math.max(s.y1, s.y2) / cell);
+      for (let cx = cx0; cx <= cx1; cx++) {
+        for (let cy = cy0; cy <= cy1; cy++) {
+          const key = (cy + 4096) * 16384 + (cx + 4096);
+          const bucket = this.fieldGrid.get(key);
+          if (bucket) bucket.push(i);
+          else this.fieldGrid.set(key, [i]);
+        }
+      }
+    }
+    this.fieldKey = this.fieldCacheKey();
+  }
+
+  /** 采样某屏幕点的流场：归一化流向 + 冷暖占优色（高斯衰减，自然过渡到邻近洋流） */
+  pointField(x: number, y: number): { vx: number; vy: number; warm: boolean; ok: boolean } {
+    const cell = this.fieldCell;
+    const g = this.fieldGrid;
+    const segs = this.fieldSegs;
+    if (!segs.length) return { vx: 0, vy: 0, warm: false, ok: false };
+    const R = 46;
+    let vx = 0, vy = 0, wt = 0, warmW = 0, coldW = 0;
+    const cx0 = Math.floor(x / cell) - 1;
+    const cy0 = Math.floor(y / cell) - 1;
+    for (let cx = cx0; cx <= cx0 + 2; cx++) {
+      for (let cy = cy0; cy <= cy0 + 2; cy++) {
+        const bucket = g.get((cy + 4096) * 16384 + (cx + 4096));
+        if (!bucket) continue;
+        for (let k = 0; k < bucket.length; k++) {
+          const s = segs[bucket[k]];
+          const abx = s.x2 - s.x1;
+          const aby = s.y2 - s.y1;
+          const len2 = abx * abx + aby * aby;
+          let t = 0;
+          if (len2 > 1e-9) t = Math.max(0, Math.min(1, ((x - s.x1) * abx + (y - s.y1) * aby) / len2));
+          const px = s.x1 + abx * t;
+          const py = s.y1 + aby * t;
+          const d = Math.hypot(x - px, y - py);
+          if (d > R) continue;
+          const w = Math.exp(-(d * d) / 450) * (0.65 + 0.35 * s.span);
+          vx += s.tx * w;
+          vy += s.ty * w;
+          wt += w;
+          if (s.warm) warmW += w; else coldW += w;
+        }
+      }
+    }
+    if (wt < 0.015) return { vx: 0, vy: 0, warm: false, ok: false };
+    return { vx: vx / wt, vy: vy / wt, warm: warmW >= coldW, ok: true };
+  }
+
+  /** 在任意洋流路径上随机取一个出生点（屏幕坐标 + 横向抖动，模拟流体扩散） */
+  spawnDot(): FlowDot {
+    const pool = this.spawnPool;
+    if (!pool.length) {
+      return { x: -999, y: -999, age: 1e9, life: 0, len: 8, width: 1.5, warm: false, seed: 0 };
+    }
+    const total = pool[pool.length - 1].cum;
+    const r = Math.random() * total;
+    let pick = pool[0];
+    for (const p of pool) {
+      if (r <= p.cum) { pick = p; break; }
+    }
+    const [lng, lat] = pointAt(pick.sp, Math.random() * pick.sp.total);
+    const [x, y] = this.proj(lng, lat);
+    const ang = Math.random() * Math.PI * 2;
+    const jr = Math.random() * 26;
+    return {
+      x: x + Math.cos(ang) * jr,
+      y: y + Math.sin(ang) * jr,
+      age: Math.random() * 3,
+      life: 4.5 + Math.random() * 5,
+      len: 6 + Math.random() * 9,
+      width: 1.15 + Math.random() * 0.85,
+      warm: pick.warm,
+      seed: Math.random() * 100,
+    };
+  }
+
+  /** Ventusky 式流场粒子：粒子沿矢量场运动，短线段尾部淡出，长短/速度/粗细各异 */
+  drawFlowField(ctx: CanvasRenderingContext2D, w: number, h: number, speedMul: number, dt: number) {
+    if (this.fieldCacheKey() !== this.fieldKey) this.rebuildField();
+    if (this.opts.showArrows === false) return;
+    const dense = this.opts.dense ?? 1;
+    const target = Math.round(Math.min(3400, Math.max(650, (w * h) / 480)) * dense);
+    const dots = this.flowDots;
+    if (dots.length > target) dots.length = target;
+    else while (dots.length < target) dots.push(this.spawnDot());
+
+    const base = 42 * speedMul; // 参考流速 px/s
+    ctx.lineCap = 'round';
+    for (let i = 0; i < dots.length; i++) {
+      const dot = dots[i];
+      const f = this.pointField(dot.x, dot.y);
+      if (f.ok) {
+        const wob = pseudoNoise(dot.x * 0.011 + this.time * 0.33, dot.seed);
+        const perpX = -f.vy;
+        const perpY = f.vx;
+        const spd = base * (0.75 + (dot.seed % 97) / 190);
+        dot.warm = f.warm;
+        const vx = f.vx * spd + perpX * wob * 7;
+        const vy = f.vy * spd + perpY * wob * 7;
+        dot.x += vx * dt;
+        dot.y += vy * dt;
+        const vlen = Math.hypot(vx, vy) || 1;
+        const ux = vx / vlen;
+        const uy = vy / vlen;
+        const tailX = dot.x - ux * dot.len;
+        const tailY = dot.y - uy * dot.len;
+        const midX = dot.x - ux * dot.len * 0.5;
+        const midY = dot.y - uy * dot.len * 0.5;
+        const fadeIn = Math.min(1, dot.age / 0.9);
+        const fadeOut = Math.min(1, (dot.life - dot.age) / 1.4);
+        const fade = Math.max(0, Math.min(fadeIn, fadeOut));
+        if (fade > 0.01) {
+          ctx.strokeStyle = dot.warm ? T_WARM : T_COLD;
+          ctx.lineWidth = dot.width;
+          ctx.globalAlpha = 0.2 * fade;
+          ctx.beginPath();
+          ctx.moveTo(tailX, tailY);
+          ctx.lineTo(midX, midY);
+          ctx.stroke();
+          ctx.globalAlpha = 0.78 * fade;
+          ctx.beginPath();
+          ctx.moveTo(midX, midY);
+          ctx.lineTo(dot.x, dot.y);
+          ctx.stroke();
+        }
+      }
+      dot.age += dt * (f.ok ? 1 : 3.5);
+      if (dot.age > dot.life || dot.x < -90 || dot.x > w + 90 || dot.y < -90 || dot.y > h + 90) {
+        dots[i] = this.spawnDot();
       }
     }
     ctx.globalAlpha = 1;
+    ctx.lineCap = 'butt';
   }
 
   drawCurrentBands(ctx: CanvasRenderingContext2D, w: number, h: number) {
@@ -939,6 +985,8 @@ export const OceanMap = forwardRef<OceanMapHandle, OceanMapProps>(function Ocean
   const engineRef = useRef<MapEngine | null>(null);
   const optsRef = useRef(props);
   optsRef.current = props;
+  // 引擎持有的 props 需要在每次渲染时同步，滑块/开关/季节才能即时生效
+  if (engineRef.current) engineRef.current.opts = props;
 
   useImperativeHandle(ref, () => ({
     focus: (id) => engineRef.current?.focus(id),
