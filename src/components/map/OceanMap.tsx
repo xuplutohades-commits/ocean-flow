@@ -6,11 +6,20 @@ import { project, unproject, samplePath, distToPath, pointAt, bboxOf, clamp, typ
 import { pseudoNoise } from '@/lib/noise';
 import type { OceanCurrent, Season, WindArrow } from '@/types';
 
-const T_WARM = '#ed7a3a'; // 柔和暖橙
-const T_COLD = '#3fa7de'; // 青蓝
-const T_WARM_TEXT = '#a84417';
-const T_COLD_TEXT = '#135c93';
-const tCol = (warm: boolean) => (warm ? T_WARM : T_COLD);
+const T_WARM = '#f09a55'; // 柔琥珀暖橙
+const T_COLD = '#62c6ef'; // 冰蓝青
+
+/** 顶部颜色梯度：每粒子按 seed 取一个色，避免所有粒子同色（暖流琥珀→珊瑚橙，寒流冰蓝→冷蓝） */
+function hexLerp(a: string, z: string, t: number): string {
+  const pa = parseInt(a.slice(1), 16), pz = parseInt(z.slice(1), 16);
+  const ar = (pa >> 16) & 255, ag = (pa >> 8) & 255, ab = pa & 255;
+  const zr = (pz >> 16) & 255, zg = (pz >> 8) & 255, zb = pz & 255;
+  const r = Math.round(ar + (zr - ar) * t), g = Math.round(ag + (zg - ag) * t), bl = Math.round(ab + (zb - ab) * t);
+  return '#' + ((1 << 24) | (r << 16) | (g << 8) | bl).toString(16).slice(1);
+}
+const WARM_GRAD = Array.from({ length: 12 }, (_, i) => hexLerp('#F6A15A', '#D96845', i / 11));
+const COLD_GRAD = Array.from({ length: 12 }, (_, i) => hexLerp('#78D8F5', '#4198D0', i / 11));
+const gradIdx = (seed: number) => ((seed * 0.12) | 0) % 12;
 
 /** 默认只显示的主要洋流；放大后其余洋流再逐步出现 */
 const MAJOR_IDS = new Set([
@@ -236,31 +245,39 @@ class MapEngine {
     const { w, h } = this;
     b.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     b.clearRect(0, 0, w, h);
-    // 深海蓝海洋底色（垂直层次），低对比、通透
+    // 海洋底色：深海→蓝→青蓝→青绿的连续空间渐变（下部较浅的海域显出青色/青绿倾向）
     const g = b.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, '#061524');
-    g.addColorStop(0.42, '#082335');
-    g.addColorStop(0.72, '#0a2d45');
-    g.addColorStop(1, '#0d3a55');
+    g.addColorStop(0, '#061827');   // 远处 / 边缘
+    g.addColorStop(0.3, '#082B46'); // 深海
+    g.addColorStop(0.62, '#0A4263'); // 普通海域
+    g.addColorStop(0.85, '#0C4F68'); // 较浅海域
+    g.addColorStop(1, '#0E5C78');    // 下缘青蓝（微顤）
     b.fillStyle = g;
     b.fillRect(0, 0, w, h);
-    // 深海青蓝微光（克制的空间层次，非热力图）
-    const spots: [number, number, number, string][] = [
-      [0.62, 0.32, 0.36, '86, 190, 235'],
-      [0.35, 0.62, 0.33, '70, 160, 210'],
-      [0.2, 0.18, 0.28, '90, 200, 240'],
-      [0.85, 0.78, 0.23, '60, 150, 200'],
+    // 海洋空间层次：中心暗光 + 几处青/青绿微光，连续且克制，不成色块
+    const light = b.createRadialGradient(w * 0.5, h * 0.44, 0, w * 0.5, h * 0.44, 0.78 * Math.min(w, h));
+    light.addColorStop(0, 'rgba(128, 208, 242, 0.10)');
+    light.addColorStop(0.6, 'rgba(96, 178, 224, 0.05)');
+    light.addColorStop(1, 'rgba(40, 90, 130, 0)');
+    b.fillStyle = light;
+    b.fillRect(0, 0, w, h);
+    const spots: [number, number, number, string, number][] = [
+      [0.62, 0.3, 0.34, '96, 205, 240', 0.11],   // 青
+      [0.33, 0.62, 0.32, '74, 176, 218', 0.1],   // 蓝
+      [0.17, 0.2, 0.27, '104, 216, 246', 0.12],  // 冰蓝
+      [0.84, 0.72, 0.25, '108, 198, 204', 0.1],  // 青绿（局部）
+      [0.42, 0.4, 0.2, '126, 200, 232', 0.09],   // 海域中心微光
     ];
-    for (const [sx, sy, rad, rgb] of spots) {
+    for (const [sx, sy, rad, rgb, a] of spots) {
       const rg = b.createRadialGradient(sx * w, sy * h, 0, sx * w, sy * h, rad * Math.min(w, h));
-      rg.addColorStop(0, 'rgba(' + rgb + ',0.10)');
+      rg.addColorStop(0, 'rgba(' + rgb + ',' + a + ')');
       rg.addColorStop(1, 'rgba(' + rgb + ',0)');
       b.fillStyle = rg;
       b.fillRect(0, 0, w, h);
     }
     // 网格：极淡辅助线，不再抢视觉焦点
     if (this.opts.showGraticule !== false) {
-      b.strokeStyle = 'rgba(140, 190, 230, 0.055)';
+      b.strokeStyle = 'rgba(148, 200, 228, 0.085)';
       b.lineWidth = 1;
       b.beginPath();
       for (let lg = -180; lg <= 180; lg += 30) {
@@ -274,7 +291,7 @@ class MapEngine {
         b.moveTo(0, y); b.lineTo(w, y);
       }
       b.stroke();
-      for (const [lt, col] of [[0, 'rgba(120, 185, 225, 0.12)'], [23.4, 'rgba(160, 180, 150, 0.05)'], [-23.4, 'rgba(160, 180, 150, 0.05)']] as const) {
+      for (const [lt, col] of [[0, 'rgba(132, 196, 228, 0.15)'], [23.4, 'rgba(150, 178, 168, 0.055)'], [-23.4, 'rgba(150, 178, 168, 0.055)']] as const) {
         const y = (this.view.lat0 - lt) * this.view.scale;
         b.strokeStyle = col;
         b.beginPath(); b.moveTo(0, y); b.lineTo(w, y); b.stroke();
@@ -282,7 +299,7 @@ class MapEngine {
     }
     // 陆地：暗色低对比；同时生成 ocean mask（1/4 分辨率）
     if (this.landReady) {
-      b.fillStyle = '#223039';
+      b.fillStyle = '#27414A';
       for (const poly of this.land) {
         b.beginPath();
         let started = false;
@@ -296,7 +313,7 @@ class MapEngine {
         b.fill();
       }
       // 海岸线
-      b.strokeStyle = 'rgba(150, 200, 230, 0.16)';
+      b.strokeStyle = 'rgba(70, 97, 106, 0.55)';
       b.lineWidth = 1;
       for (const poly of this.land) {
         b.beginPath();
@@ -897,23 +914,23 @@ class MapEngine {
         let fade = Math.max(0, Math.min(fadeIn, fadeOut));
         if (this.opts.dimUnselected && this.opts.selectedId && f.cId !== this.opts.selectedId) fade *= 0.16;
         // 边缘渐隐：离开流场核心越远越透明（密度/透明度梯度）
-        fade *= 0.28 + 0.72 * Math.min(1, f.weight);
+        fade *= 0.18 + 0.82 * Math.min(1, f.weight);
         if (fade <= 0.02) continue;
-        const col = dot.warm ? T_WARM : T_COLD;
+        const col = dot.warm ? WARM_GRAD[gradIdx(dot.seed)] : COLD_GRAD[gradIdx(dot.seed)];
         ctx.strokeStyle = col;
         ctx.lineWidth = dot.width * clamp(lod * 0.85, 0.6, 1.7);
         // 柔和彗尾：4 段渐次淡出的短尾叠加 → 流动感而非独立短线
         for (let s = 1; s <= 4; s++) {
           const t1 = s / 4;
           const t0 = (s - 1) / 4;
-          ctx.globalAlpha = fade * (0.028 + 0.1 * t1);
+          ctx.globalAlpha = fade * (0.022 + 0.082 * t1);
           ctx.beginPath();
           ctx.moveTo(dot.x - ux * effLen * t0, dot.y - uy * effLen * t0);
           ctx.lineTo(dot.x - ux * effLen * t1, dot.y - uy * effLen * t1);
           ctx.stroke();
         }
         // 头部一个柔亮小点，让流向可读
-        ctx.globalAlpha = fade * 0.15;
+        ctx.globalAlpha = fade * 0.12;
         ctx.beginPath();
         ctx.arc(dot.x, dot.y, dot.width * 0.85, 0, Math.PI * 2);
         ctx.fill();
@@ -1068,7 +1085,7 @@ class MapEngine {
       const padX = 7;
       const bh = fs + 8;
       ctx.globalAlpha = alpha;
-      ctx.fillStyle = 'rgba(2, 8, 16, 0.62)';
+      ctx.fillStyle = 'rgba(5, 24, 41, 0.66)';
       ctx.beginPath();
       ctx.roundRect(x - tw / 2 - padX, y - bh / 2, tw + padX * 2, bh, 6);
       ctx.fill();

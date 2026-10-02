@@ -148,7 +148,7 @@ export default function CurrentsPage() {
               <h1 className="title-disp text-[22px] md:text-[28px] mt-1 grad-text">全球洋流</h1>
               <div className="text-[12px] text-[#8ba7c6] mt-1 hidden md:block">点击任意洋流查看详情 · 滚轮缩放 · 拖动平移</div>
             </div>
-            <div className="pointer-events-auto rounded-xl px-3 py-2" style={{ background: 'rgba(4,14,28,0.7)', border: '1px solid rgba(126,190,255,0.15)', backdropFilter: 'blur(8px)' }}>
+            <div className="pointer-events-auto rounded-xl px-3 py-2" style={{ background: 'rgba(5,25,40,0.78)', border: '1px solid rgba(100,200,220,0.15)', backdropFilter: 'blur(8px)' }}>
               <DotLegend />
             </div>
           </div>

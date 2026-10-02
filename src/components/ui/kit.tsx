@@ -111,8 +111,8 @@ export function Reveal({ children, className = '', delay = 0 }: { children: Reac
 export function DotLegend({ warm = '暖流', cold = '寒流' }: { warm?: string; cold?: string }) {
   return (
     <div className="flex items-center gap-4 text-[12px] text-[#8ba7c6]">
-      <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: '#ff9d5c', boxShadow: '0 0 8px rgba(255,157,92,.7)' }} />{warm}</span>
-      <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: '#5ec8ff', boxShadow: '0 0 8px rgba(94,200,255,.7)' }} />{cold}</span>
+      <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: '#f6a15a', boxShadow: '0 0 8px rgba(246,161,90,.7)' }} />{warm}</span>
+      <span className="flex items-center gap-1.5"><span className="inline-block w-2.5 h-2.5 rounded-full" style={{ background: '#78d8f5', boxShadow: '0 0 8px rgba(120,216,245,.7)' }} />{cold}</span>
     </div>
   );
 }

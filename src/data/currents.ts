@@ -535,7 +535,7 @@ export function labelPoint(c: OceanCurrent, season: 'summer' | 'winter'): [numbe
   return p[Math.floor(p.length * 0.5)];
 }
 
-export const WARM_COLOR = '#f08a4b'; // 柔和暖橙
+export const WARM_COLOR = '#f6a15a'; // 柔琥珀暖橙
 
 
 /** 考虑季节的洋流性质：索马里沿岸流冬季转暖（上升流停止） */
@@ -543,7 +543,7 @@ export function seasonalType(c: OceanCurrent, season: 'summer' | 'winter'): 'war
   if (c.id === 'somaliSummer' && season === 'winter') return 'warm';
   return c.type;
 }
-export const COLD_COLOR = '#4db3e6'; // 青蓝
+export const COLD_COLOR = '#78d8f5'; // 冰蓝青
 
 export function typeColor(type: 'warm' | 'cold') {
   return type === 'warm' ? WARM_COLOR : COLD_COLOR;
