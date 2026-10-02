@@ -708,42 +708,8 @@ class MapEngine {
       }
     }
 
-    // 教学第一步：把构成“8”字环流的洋流本身加深描边（外发光 + 主色）
-    const hids = this.opts.highlightIds;
-    if (hids?.length) {
-      for (const id of hids) {
-        const c = CURRENT_MAP[id];
-        if (!c) continue;
-        const sp = samplePathCache(c, season);
-        const col = typeColor(seasonalType(c, season));
-        ctx.strokeStyle = col;
-        ctx.lineCap = 'round';
-        ctx.lineJoin = 'round';
-        ctx.beginPath();
-        let px0 = NaN;
-        const half = w / 2;
-        for (const p of sp.pts) {
-          const [x0, y0] = this.proj(p[0], p[1]);
-          // 经度环绕：把路径折叠回当前视窗最接近的副本，跨缝自动断开
-          const x = x0 - w * Math.round((x0 - half) / w);
-          if (isNaN(px0) || Math.abs(x - px0) > half) {
-            ctx.moveTo(x, y0);
-          } else {
-            ctx.lineTo(x, y0);
-          }
-          px0 = x;
-        }
-        // 外圈柔光 + 主路径加深
-        ctx.globalAlpha = 0.22;
-        ctx.lineWidth = 9;
-        ctx.stroke();
-        ctx.globalAlpha = 0.78;
-        ctx.lineWidth = 3.2;
-        ctx.stroke();
-        ctx.globalAlpha = 1;
-        ctx.lineWidth = 1;
-      }
-    }
+    // （教学第一步的“8”字洋流强调在 drawFlowField 里通过粒子加粗加亮实现，
+    //  这里不画任何路径线条）
 
     // 监测点位置上报（节流）
     this.trackerReport += dt;
@@ -985,6 +951,8 @@ class MapEngine {
       const dot = dots[i];
       const f = this.pointField(dot.x, dot.y);
       if (f.ok) {
+        // 教学第一步的“8”字洋流：粒子加粗加亮突出
+        const emph = this.opts.highlightIds?.length ? this.opts.highlightIds.includes(f.cId) : false;
         const wob = pseudoNoise(dot.x * 0.011 + this.time * 0.33, dot.seed);
         // 世界(经,纬)方向 → 屏幕方向（y 轴翻转并归一化）
         const dirX = f.vx, dirY = -f.vy;
@@ -1016,26 +984,32 @@ class MapEngine {
         const fadeOut = Math.min(1, (dot.life - dot.age) / 2.4);
         let fade = Math.max(0, Math.min(fadeIn, fadeOut));
         if (this.opts.dimUnselected && this.opts.selectedId && f.cId !== this.opts.selectedId) fade *= 0.16;
+        // 教学第一步：未高亮的洋流粒子压暗，突出 8 条“8”字洋流
+        if (this.opts.highlightIds?.length && !emph) fade *= 0.42;
         // 边缘渐隐：离开流场核心越远越透明（密度/透明度梯度）
         fade *= 0.18 + 0.82 * Math.min(1, f.weight);
         if (fade <= 0.02) continue;
-        const col = dot.warm ? WARM_GRAD[gradIdx(dot.seed)] : COLD_GRAD[gradIdx(dot.seed)];
+        // 高亮粒子取更亮的色阶（琥珀/冰蓝的亮端）并加粗
+        const gIdx = gradIdx(dot.seed);
+        const col = dot.warm
+          ? WARM_GRAD[emph ? Math.min(4, gIdx) : gIdx]
+          : COLD_GRAD[emph ? Math.min(4, gIdx) : gIdx];
         ctx.strokeStyle = col;
-        ctx.lineWidth = dot.width * clamp(lod * 0.85, 0.6, 1.7);
+        ctx.lineWidth = dot.width * clamp(lod * 0.85, 0.6, 1.7) * (emph ? 2.0 : 1);
         // 柔和彗尾：4 段渐次淡出的短尾叠加 → 流动感而非独立短线
         for (let s = 1; s <= 4; s++) {
           const t1 = s / 4;
           const t0 = (s - 1) / 4;
-          ctx.globalAlpha = fade * (0.022 + 0.082 * t1);
+          ctx.globalAlpha = fade * (0.022 + 0.082 * t1) * (emph ? 1.7 : 1);
           ctx.beginPath();
           ctx.moveTo(dot.x - ux * effLen * t0, dot.y - uy * effLen * t0);
           ctx.lineTo(dot.x - ux * effLen * t1, dot.y - uy * effLen * t1);
           ctx.stroke();
         }
         // 头部一个柔亮小点，让流向可读
-        ctx.globalAlpha = fade * 0.12;
+        ctx.globalAlpha = fade * (emph ? 0.28 : 0.12);
         ctx.beginPath();
-        ctx.arc(dot.x, dot.y, dot.width * 0.85, 0, Math.PI * 2);
+        ctx.arc(dot.x, dot.y, dot.width * 0.85 * (emph ? 1.65 : 1), 0, Math.PI * 2);
         ctx.fill();
       }
       dot.age += dt * (f.ok ? 1 : 3.5);
