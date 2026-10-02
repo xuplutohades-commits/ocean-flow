@@ -36,7 +36,7 @@ export default function Home() {
             <Reveal delay={0.32}>
               <div className="mt-6 flex items-center gap-6 text-[11.5px] text-[#5f7b99]">
                 <DotLegend />
-                <span className="hidden md:inline">拖动地球查看 · 洋流粒子持续流动</span>
+                <span className="hidden md:inline">拖动地球查看 · 箭头方向即洋流流向</span>
               </div>
             </Reveal>
           </div>
@@ -53,6 +53,11 @@ export default function Home() {
             <div aria-hidden className="absolute bottom-[8%] left-1/2 -translate-x-1/2 text-center select-none"
               style={{ pointerEvents: 'none' }}>
               <div className="kicker-dim">DRAG TO ROTATE</div>
+            </div>
+            <div aria-hidden className="absolute bottom-[8%] right-[2%] flex flex-col items-end gap-1.5 select-none" style={{ pointerEvents: 'none' }}>
+              <span className="badge" style={{ background: 'rgba(4,14,28,0.75)', color: '#ffb072', borderColor: 'rgba(255,176,114,0.35)' }}>▶ 暖流</span>
+              <span className="badge" style={{ background: 'rgba(4,14,28,0.75)', color: '#6fc9ff', borderColor: 'rgba(111,201,255,0.35)' }}>▶ 寒流</span>
+              <span className="badge" style={{ background: 'rgba(4,14,28,0.75)', color: '#a9c3de' }}>→ 流向</span>
             </div>
           </div>
         </div>

@@ -1,0 +1,12 @@
+import { chromium } from 'playwright-core';
+const EXE = '/Users/qianxu/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--use-angle=metal'] });
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+const errs = [];
+page.on('console', (m) => { if (m.type() === 'error' && !/Clock/.test(m.text())) errs.push(m.text().slice(0, 200)); });
+await page.goto('http://localhost:3000/', { waitUntil: 'networkidle' });
+await page.waitForTimeout(5000);
+const g = await page.evaluate(() => window.__g);
+console.log('scene:', JSON.stringify(g));
+console.log('errors:', errs.length ? errs.join(' || ') : 'none');
+await browser.close();

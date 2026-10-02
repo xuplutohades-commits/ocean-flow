@@ -1,0 +1,13 @@
+import { chromium } from 'playwright-core';
+const EXE = '/Users/qianxu/Library/Caches/ms-playwright/chromium-1223/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing';
+const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--use-angle=metal'] });
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+await page.goto('http://localhost:3000/', { waitUntil: 'networkidle' });
+await page.waitForTimeout(3000);
+const a = await page.evaluate(() => window.__g);
+await page.waitForTimeout(2200);
+const b = await page.evaluate(() => window.__g);
+console.log('sample A:', JSON.stringify(a));
+console.log('sample B:', JSON.stringify(b));
+console.log('moved:', JSON.stringify(a?.merged?.first6) !== JSON.stringify(b?.merged?.first6));
+await browser.close();
