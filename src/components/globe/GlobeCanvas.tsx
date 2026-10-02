@@ -37,7 +37,7 @@ function CurrentArrows() {
 
   // 锥体基形（非索引，逐顶点坐标）
   const coneBase = useMemo(() => {
-    const g = new THREE.ConeGeometry(0.014, 0.05, 5).toNonIndexed();
+    const g = new THREE.ConeGeometry(0.017, 0.062, 5).toNonIndexed();
     const p = g.getAttribute('position')?.array as Float32Array | undefined;
     return { pos: p ? new Float32Array(p) : new Float32Array(0), count: p ? g.getAttribute('position')!.count : 0 };
   }, []);

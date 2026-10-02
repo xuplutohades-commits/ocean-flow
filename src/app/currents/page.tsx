@@ -97,6 +97,7 @@ export default function CurrentsPage() {
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [showBelts, setShowBelts] = useState(false);
   const [showLabels, setShowLabels] = useState(true);
+  const [showArrows, setShowArrows] = useState(true);
   const [dense, setDense] = useState(1);
   const [speed, setSpeed] = useState(1);
   const [step, setStep] = useState(0);
@@ -134,6 +135,7 @@ export default function CurrentsPage() {
             interactive
             showWindBelts={showBelts}
             showLabels={showLabels}
+            showArrows={showArrows}
             dense={dense}
             speed={speed}
             selectedId={selectedId}
@@ -170,6 +172,10 @@ export default function CurrentsPage() {
                 <label className="flex items-center gap-2 text-[12.5px] text-[#a9c3de]">
                   名称
                   <span className={`toggle ${showLabels ? 'toggle-on' : ''}`} onClick={() => setShowLabels(!showLabels)} />
+                </label>
+                <label className="flex items-center gap-2 text-[12.5px] text-[#a9c3de]">
+                  方向箭头
+                  <span className={`toggle ${showArrows ? 'toggle-on' : ''}`} onClick={() => setShowArrows(!showArrows)} />
                 </label>
                 <label className="flex items-center gap-2 text-[12.5px] text-[#a9c3de] min-w-[140px]">
                   粒子密度

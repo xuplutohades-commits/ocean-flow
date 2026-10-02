@@ -45,6 +45,8 @@ export interface OceanMapProps {
   style?: React.CSSProperties;
   dimUnselected?: boolean;
   labelsOnlySelected?: boolean;
+  /** Ventusky 风格：沿洋流绘制清晰的实心方向箭头（默认开启） */
+  showArrows?: boolean;
   pollute?: PollutionSource[];
   floatCount?: number;
 }
@@ -127,6 +129,7 @@ class MapEngine {
   pollutionSources: PollutionSource[] = [];
   pollAccum: Record<string, number> = {};
   hovered: string | null = null;
+  arrowGrid: { sp: SampledPath; ss: number[]; c: OceanCurrent }[] = [];
   land: { x: number; y: number }[][] = [];
   landReady = false;
   raf = 0;
@@ -264,6 +267,7 @@ class MapEngine {
     const ids = this.opts.currentIds?.length ? this.opts.currentIds : CURRENTS.map((c) => c.id);
     const season = this.opts.season ?? 'summer';
     const dense = this.opts.dense ?? 1;
+    this.buildArrowGrid();
     this.particles = [];
     for (const id of ids) {
       const c = CURRENT_MAP[id];
@@ -283,6 +287,21 @@ class MapEngine {
   }
 
   setPathSeason() { this.buildParticles(); }
+
+  buildArrowGrid() {
+    const ids = this.opts.currentIds?.length ? this.opts.currentIds : CURRENTS.map((c) => c.id);
+    const season = this.opts.season ?? 'summer';
+    const step = 7; // 度（沿路径）
+    this.arrowGrid = [];
+    for (const id of ids) {
+      const c = CURRENT_MAP[id];
+      if (!c) continue;
+      const sp = samplePathCache(c, season);
+      const ss: number[] = [];
+      for (let x = 0; x < sp.total; x += step) ss.push(x);
+      if (ss.length) this.arrowGrid.push({ sp, ss, c });
+    }
+  }
 
   focus(id?: string | null) {
     const c = id ? CURRENT_MAP[id] : null;
@@ -439,6 +458,9 @@ class MapEngine {
 
     // 洋流带底层（半透明路径）
     this.drawCurrentBands(ctx, w, h);
+
+    // Ventusky 式方向箭头
+    this.drawArrows(ctx, w, h);
 
     // 粒子
     for (const p of this.particles) {
@@ -624,6 +646,54 @@ class MapEngine {
   }
 
   sampleOwner = new Map<SampledPath, OceanCurrent>();
+
+  drawArrows(ctx: CanvasRenderingContext2D, w: number, h: number) {
+    if ((this.opts.showArrows ?? true) === false) return;
+    const season = this.opts.season ?? 'summer';
+    const time = this.time;
+    for (let gi = 0; gi < this.arrowGrid.length; gi++) {
+      const { sp, ss, c } = this.arrowGrid[gi];
+      const col = typeColor(seasonalType(c, season));
+      const stem = clamp(this.view.scale * 0.55, 8, 20);
+      for (let k = 0; k < ss.length; k++) {
+        const s0 = ss[k];
+        const [lng, lat] = pointAt(sp, s0);
+        const [lng2, lat2] = pointAt(sp, Math.min(sp.total, s0 + 1.4));
+        const [x1, y1] = this.proj(lng, lat);
+        const [x2, y2] = this.proj(lng2, lat2);
+        if (x1 < -60 || x1 > w + 60 || y1 < -60 || y1 > h + 60) continue;
+        const dx = x2 - x1;
+        const dy = y2 - y1;
+        const len = Math.hypot(dx, dy) || 1;
+        const ux = dx / len;
+        const uy = dy / len;
+        const px = -uy;
+        const py = ux;
+        const half = stem * 0.62;
+        const pulse = 0.68 + 0.24 * Math.sin(time * 1.8 + gi * 0.83 + k * 0.29);
+        ctx.globalAlpha = pulse;
+        // 箭杆
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 1.6;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x1 - ux * stem * 1.15, y1 - uy * stem * 1.15);
+        ctx.lineTo(x1 + ux * stem * 0.25, y1 + uy * stem * 0.25);
+        ctx.stroke();
+        // 实心箭头头（Ventusky 式）
+        const tx = x1 + ux * stem * 1.55;
+        const ty = y1 + uy * stem * 1.55;
+        ctx.fillStyle = col;
+        ctx.beginPath();
+        ctx.moveTo(tx, ty);
+        ctx.lineTo(x1 + ux * stem * 0.5 + px * half, y1 + uy * stem * 0.5 + py * half);
+        ctx.lineTo(x1 + ux * stem * 0.5 - px * half, y1 + uy * stem * 0.5 - py * half);
+        ctx.closePath();
+        ctx.fill();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
 
   drawCurrentBands(ctx: CanvasRenderingContext2D, w: number, h: number) {
     const season = this.opts.season ?? 'summer';
