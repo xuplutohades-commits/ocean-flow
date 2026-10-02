@@ -3,7 +3,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useLoader } from '@react-three/fiber';
 import { OrbitControls, Stars } from '@react-three/drei';
 import * as THREE from 'three';
-import { CURRENT_MAP, pathOf } from '@/data/currents';
+import { CURRENTS, pathOf } from '@/data/currents';
 import { samplePath } from '@/lib/geo';
 
 const R = 1.0;
@@ -21,7 +21,7 @@ function lngLatToVec(lng: number, lat: number, r = 1, out?: THREE.Vector3): THRE
 
 
 
-/** 水面反光：一束缓慢环绕的“阳光”，像日光在高光洋面上滑动 */
+
 /** 固定种子 PRNG：让组件在渲染期保持纯函数（随机只在模块构建期发生一次） */
 function mulberry32(seed: number) {
   let s = seed | 0;
@@ -35,46 +35,60 @@ function mulberry32(seed: number) {
 
 const DEG2RAD = Math.PI / 180;
 
-/* ── 流场参数：当前只做日本暖流（黑潮）─────────────────────────
- * 视觉目标：日本东侧一条“正在流动的橙色海流带”——有宽度、核心主流、
- * 边缘减速渐隐、柔和渐变尾迹。验证满意后把其他洋流的 id 加入 FLOW_IDS。
+/* ── 流场参数 ─────────────────────────────────────────────
+ * 全球洋流统一使用“连续平流粒子场”：每条洋流按宽度拥有自己的流带半宽、
+ * 流速系数与颜色；粒子在局部速度场里被平流，留下渐变的尾迹。
+ * 视觉：柔软、有宽度、持续流动的“海流带”，而不是短线群。
  */
-const FLOW_IDS = ['kuroshio'];
 const TRAIL_N = 7;                                            // 每粒子尾迹点数
 const TRAIL_W: number[] = [0.05, 0.13, 0.23, 0.35, 0.52, 0.74, 1.0]; // 尾→头 alpha 权重
-const TRAIL_STEP = 7;                                         // 每 N 帧记录一个尾迹点
-const HALF_BAND_DEG = 4.6;                                    // 流带半宽（速度场 σ）
-const CORE_SPEED_DEG = 1.35;                                  // 核心带参考流速 °/s
-const PARTICLE_COUNT = 2100;
+const TRAIL_STEP = 9;                                         // 每 N 帧记录一个尾迹点
+const CORE_SPEED_DEG = 1.3;                                   // 核心带参考流速 °/s
+const PARTICLE_LIMIT = 9000;
+const WARM: [number, number, number] = [1.0, 0.58, 0.28];     // 柔和的暖橙金
+const COLD: [number, number, number] = [0.45, 0.75, 1.0];     // 柔和的蓝青
 
-/** 洋流中心线片段：单位球面上的位置 + 流向切向量（构成连续速度场） */
+/** 洋流中心线片段：单位球面上的位置 + 流向切向量 */
 interface FieldSeg {
   q: THREE.Vector3;
   t: THREE.Vector3;
 }
 
-interface FlowParticle2 {
-  dir: THREE.Vector3;            // 单位方向（球心→表面）
-  rad: number;                   // 距球心半径（轻微深度变化）
-  speedF: number;                // 个体速度差
-  life: number;
-  age: number;
-  opacity: number;               // 个体透明度变化
-  seed: number;
-  step: number;                  // 尾迹记录节拍
-  trail: THREE.Vector3[];        // 尾迹（已乘 rad，head 在末尾）
+/** 一条洋流的完整流场：中心线 + 带宽 + 流速系数 + 暖寒属性 */
+interface FlowField {
+  warm: boolean;
+  band: number;         // 流带半宽（速度场 σ，度）
+  speedK: number;       // 流速系数
+  segs: FieldSeg[];
+  total: number;        // 路径总长（度）
 }
 
-/** 由洋流路径构建连续速度场：中心线按 0.3° 采样 + 表面切向 */
-function buildFlowField(): FieldSeg[] {
-  const segs: FieldSeg[] = [];
+interface FlowParticle2 {
+  dir: THREE.Vector3;   // 单位方向（球心→表面）
+  rad: number;          // 距球心半径（轻微深度变化）
+  speedF: number;       // 个体速度差
+  life: number;
+  age: number;
+  opacity: number;      // 个体透明度变化
+  seed: number;
+  step: number;         // 尾迹记录节拍
+  segIdx: number;       // 上一帧命中的中心线段（窗口搜索锚点）
+  frameCheck: number;   // 定期全量重锚计数
+  ff: FlowField;        // 所属洋流的流场
+  trail: THREE.Vector3[]; // 尾迹（已乘 rad，head 在末尾）
+}
+
+/** 构建全球连续速度场：每条洋流 = 中心线按 0.35° 采样 + 表面切向 */
+function buildFlowFields(): FlowField[] {
+  const out: FlowField[] = [];
   const tmp = new THREE.Vector3();
-  for (const id of FLOW_IDS) {
-    const c = CURRENT_MAP[id];
-    if (!c) continue;
-    const sp = samplePath(pathOf(c, 'summer'), 0.3);
+  for (const c of CURRENTS) {
+    const sp = samplePath(pathOf(c, 'summer'), 0.35);
+    if (sp.total < 4) continue;
+    const span = c.width ?? 1;
     const qs: THREE.Vector3[] = [];
     for (const [lng, lat] of sp.pts) qs.push(lngLatToVec(lng, lat, 1));
+    const segs: FieldSeg[] = [];
     for (let i = 0; i < qs.length - 1; i++) {
       const q = qs[i];
       const t = tmp.copy(qs[i + 1]).sub(q);
@@ -82,17 +96,25 @@ function buildFlowField(): FieldSeg[] {
       t.normalize();
       segs.push({ q: q.clone(), t: t.clone() });
     }
+    out.push({
+      warm: c.type === 'warm',
+      band: 1.6 + span * 2.0,
+      speedK: 0.75 + span * 0.45,
+      segs,
+      total: sp.total,
+    });
   }
-  return segs;
+  return out;
 }
 
-/** 在流带内生成粒子：高斯横向偏移 → 中心密、边缘稀；个体参数随机变化 */
-function spawnParticle(seg: FieldSeg, rnd: () => number, freshAge: boolean): FlowParticle2 {
+/** 在指定洋流的流带内生成粒子：高斯横向偏移 → 中心密、边缘稀 */
+function spawnParticle(ff: FlowField, rnd: () => number, freshAge: boolean): FlowParticle2 {
+  const seg = ff.segs[Math.floor(rnd() * ff.segs.length)];
   const g = Math.max(-2.2, Math.min(2.2, (rnd() + rnd() + rnd() - 1.5) / 0.5));
   const perp = new THREE.Vector3().crossVectors(seg.q, seg.t).normalize();
   const dir = new THREE.Vector3()
     .copy(seg.q)
-    .addScaledVector(perp, g * 0.6 * HALF_BAND_DEG * DEG2RAD)
+    .addScaledVector(perp, g * 0.6 * ff.band * DEG2RAD)
     .normalize();
   const rad = 1.003 + rnd() * 0.009;
   const pos = dir.clone().multiplyScalar(rad);
@@ -105,48 +127,38 @@ function spawnParticle(seg: FieldSeg, rnd: () => number, freshAge: boolean): Flo
     speedF: 0.7 + rnd() * 0.6,
     life,
     age: freshAge ? rnd() * life : 0,
-    opacity: 0.38 + rnd() * 0.6,
+    opacity: 0.42 + rnd() * 0.58,
     seed: rnd() * 100,
     step: 0,
+    segIdx: Math.floor(rnd() * ff.segs.length),
+    frameCheck: 0,
+    ff,
     trail,
   };
 }
 
-const FLOW_VS =
-  'attribute float aAlpha;\n' +
-  'varying vec3 vColor;\n' +
-  'varying float vAlpha;\n' +
-  'void main() {\n' +
-  '  vColor = color;\n' +
-  '  vAlpha = aAlpha;\n' +
-  '  vec4 mv = modelViewMatrix * vec4(position, 1.0);\n' +
-  '  gl_Position = projectionMatrix * mv;\n' +
-  '  float facing = clamp(dot(normalize(position), normalize(cameraPosition)), 0.0, 1.0);\n' +
-  '  vAlpha *= 0.35 + 0.65 * facing;\n' +
-  '}\n';
-const FLOW_FS =
-  'varying vec3 vColor;\n' +
-  'varying float vAlpha;\n' +
-  'uniform float uOpacity;\n' +
-  'void main() {\n' +
-  '  gl_FragColor = vec4(vColor, vAlpha * uOpacity);\n' +
-  '}\n';
+const FLOW_VS = 'attribute float aAlpha; varying vec3 vColor; varying float vAlpha; void main() { vColor = color; vAlpha = aAlpha; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv; float facing = clamp(dot(normalize(position), normalize(cameraPosition)), 0.0, 1.0); vAlpha *= 0.4 + 0.6 * facing; }';
+const FLOW_FS = 'varying vec3 vColor; varying float vAlpha; uniform float uOpacity; void main() { gl_FragColor = vec4(vColor, vAlpha * uOpacity); }';
 
 /**
- * 球面连续流场：粒子 position → sample velocity field → move → trail → fade → respawn。
- * 方向始终由所在位置的局部矢量场决定；尾迹沿流场弯曲并以 alpha 渐变淡出，
- * 视觉上是“水在流动”而不是“短线群”。
+ * 全球洋流平流粒子场：
+ * position → sample local velocity field → update velocity → move → trail → fade → respawn。
+ * 方向永远由所在位置的流场决定；尾迹沿流场弯曲、alpha 渐变淡出。
  */
 function CurrentFlow() {
-  const field = useMemo(() => buildFlowField(), []);
+  const fields = useMemo(() => buildFlowFields(), []);
   const items = useMemo<FlowParticle2[]>(() => {
     const rnd = mulberry32(20261002);
     const list: FlowParticle2[] = [];
-    for (let i = 0; i < PARTICLE_COUNT && field.length; i++) {
-      list.push(spawnParticle(field[Math.floor(rnd() * field.length)], rnd, true));
+    for (const ff of fields) {
+      const n = Math.min(900, Math.max(14, Math.round((ff.total / 0.3) * (0.65 + ff.band * 0.13))));
+      for (let i = 0; i < n && list.length < PARTICLE_LIMIT; i++) {
+        list.push(spawnParticle(ff, rnd, true));
+      }
+      if (list.length >= PARTICLE_LIMIT) break;
     }
     return list;
-  }, [field]);
+  }, [fields]);
 
   const segV = (TRAIL_N - 1) * 2;
   const posAttr = useMemo(() => {
@@ -172,7 +184,7 @@ function CurrentFlow() {
   const mat = useMemo(
     () =>
       new THREE.ShaderMaterial({
-        uniforms: { uOpacity: { value: 0.5 } },
+        uniforms: { uOpacity: { value: 0.9 } },
         vertexColors: true,
         transparent: true,
         depthWrite: false,
@@ -189,26 +201,54 @@ function CurrentFlow() {
 
   useFrame((_, delta) => {
     const d = Math.min(delta, 0.05);
-    if (!field.length) return;
+    if (!items.length) return;
     const pos = posAttr.array as Float32Array;
     const col = colAttr.array as Float32Array;
     const alp = alpAttr.array as Float32Array;
-    const sig = HALF_BAND_DEG * DEG2RAD;
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
-      // 1) 采样局部流场：最近中心线点（弦距离，与弧距单调等价）
-      let best = 0;
+      const ff = it.ff;
+      const sig = ff.band * DEG2RAD;
+      // 1) 采样局部速度场：以上一帧命中的中心线段为中心扫 ±18 段
+      //    （粒子每帧位移极小，窗口足够）；每 150 帧全量重锚防失锁
+      it.frameCheck += 1;
+      const fullScan = it.frameCheck >= 150;
+      let best = it.segIdx;
       let bd = Infinity;
-      for (let j = 0; j < field.length; j++) {
-        const dd = it.dir.distanceToSquared(field[j].q);
-        if (dd < bd) { bd = dd; best = j; }
+      if (!fullScan && ff.segs.length > 2) {
+        const n = ff.segs.length;
+        const from = Math.max(0, best - 18);
+        const to = Math.min(n, best + 19);
+        for (let j = from; j < to; j++) {
+          const dd = it.dir.distanceToSquared(ff.segs[j].q);
+          if (dd < bd) { bd = dd; best = j; }
+        }
+        // 路径首尾相接（环流）：越过接缝时检查另一侧
+        if (best < 12) {
+          for (let j = n - 18; j < n; j++) {
+            const dd = it.dir.distanceToSquared(ff.segs[j].q);
+            if (dd < bd) { bd = dd; best = j; }
+          }
+        } else if (best >= n - 12) {
+          for (let j = 0; j < 18; j++) {
+            const dd = it.dir.distanceToSquared(ff.segs[j].q);
+            if (dd < bd) { bd = dd; best = j; }
+          }
+        }
+      } else {
+        it.frameCheck = 0;
+        for (let j = 0; j < ff.segs.length; j++) {
+          const dd = it.dir.distanceToSquared(ff.segs[j].q);
+          if (dd < bd) { bd = dd; best = j; }
+        }
       }
-      const seg = field[best];
+      it.segIdx = best;
+      const seg = ff.segs[best];
       const w = Math.exp(-bd / (2 * sig * sig));
-      // 2) 更新速度：切向平流 + 轻微横向游动（方向仍由流场决定）
+      // 2) 更新速度：切向平流 + 轻微横向游动
       tmpT.copy(seg.t).addScaledVector(it.dir, -seg.t.dot(it.dir)).normalize();
       tmpP.crossVectors(it.dir, tmpT).normalize();
-      const spd = CORE_SPEED_DEG * DEG2RAD * it.speedF * (0.8 + 0.25 * Math.sin(it.age * 0.5 + it.seed));
+      const spd = CORE_SPEED_DEG * ff.speedK * DEG2RAD * it.speedF * (0.8 + 0.25 * Math.sin(it.age * 0.5 + it.seed));
       const drift = (0.04 + 0.07 * Math.sin(it.age * 0.6 + it.seed * 0.17)) * DEG2RAD;
       tmpV.copy(tmpT).multiplyScalar(spd * w).addScaledVector(tmpP, drift * w);
       // 3) 移动（贴合球面曲率）
@@ -218,9 +258,9 @@ function CurrentFlow() {
       const fi = Math.min(1, it.age / 1.1);
       const fo = Math.min(1, (it.life - it.age) / 2.4);
       const f = Math.max(0, Math.min(fi, fo));
-      const alpha = it.opacity * (0.3 + 0.7 * w) * f;
+      const alpha = it.opacity * (0.45 + 0.55 * w) * f;
 
-      // 4) 尾迹记录（每 TRAIL_STEP 帧一个点，控制尾巴长度）
+      // 4) 尾迹记录
       it.step += 1;
       if (it.step >= TRAIL_STEP) {
         it.step = 0;
@@ -230,7 +270,7 @@ function CurrentFlow() {
 
       // 5) 生命周期结束或离开流场 → 重生
       if (it.age > it.life || w < 0.03) {
-        const np = spawnParticle(seg, Math.random, false);
+        const np = spawnParticle(ff, Math.random, false);
         it.dir.copy(np.dir);
         it.rad = np.rad;
         it.speedF = np.speedF;
@@ -239,12 +279,15 @@ function CurrentFlow() {
         it.opacity = np.opacity;
         it.seed = np.seed;
         it.step = 0;
+        it.segIdx = np.segIdx;
+        it.frameCheck = 150;
         it.trail = np.trail;
       }
 
-      // 6) 写入顶点：每粒子 (TRAIL_N-1) 段，段间 alpha 渐变、头亮尾淡
+      // 6) 写入顶点：段间 alpha 渐变、头亮尾淡
       const o = i * segV;
       const tint = 0.9 + 0.1 * Math.sin(it.seed * 1.7);
+      const base = ff.warm ? WARM : COLD;
       for (let kk = 0; kk < TRAIL_N - 1; kk++) {
         const va = it.trail[kk];
         const vb = it.trail[kk + 1];
@@ -253,14 +296,14 @@ function CurrentFlow() {
         pos[vx + 3] = vb.x; pos[vx + 4] = vb.y; pos[vx + 5] = vb.z;
         const wA = TRAIL_W[kk];
         const wB = TRAIL_W[kk + 1];
-        const cfA = 0.42 + 0.58 * wA;
-        const cfB = 0.42 + 0.58 * wB;
-        col[vx] = Math.min(1, 0.92 * cfA * tint);
-        col[vx + 1] = Math.min(1, 0.5 * cfA * tint);
-        col[vx + 2] = Math.min(1, 0.22 * cfA * tint);
-        col[vx + 3] = Math.min(1, 0.92 * cfB * tint);
-        col[vx + 4] = Math.min(1, 0.5 * cfB * tint);
-        col[vx + 5] = Math.min(1, 0.22 * cfB * tint);
+        const cfA = 0.45 + 0.55 * wA;
+        const cfB = 0.45 + 0.55 * wB;
+        col[vx] = Math.min(1, base[0] * cfA * tint);
+        col[vx + 1] = Math.min(1, base[1] * cfA * tint);
+        col[vx + 2] = Math.min(1, base[2] * cfA * tint);
+        col[vx + 3] = Math.min(1, base[0] * cfB * tint);
+        col[vx + 4] = Math.min(1, base[1] * cfB * tint);
+        col[vx + 5] = Math.min(1, base[2] * cfB * tint);
         alp[o + kk * 2] = wA * alpha;
         alp[o + kk * 2 + 1] = wB * alpha;
       }
@@ -272,6 +315,7 @@ function CurrentFlow() {
 
   return <lineSegments geometry={geo} material={mat} frustumCulled={false} />;
 }
+
 function SunGlint() {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   useFrame(({ clock }) => {
