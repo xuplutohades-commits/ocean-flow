@@ -27,9 +27,13 @@ interface FlowItem {
   s: number;        // 沿路径的当前位置（度）
   speed: number;    // 角速度 °/s
   len: number;      // 线段弧长（度）
+  band: number;     // 该洋流流带半宽（度）
+  edge: number;     // 横向位置 u ~ N(0,1)：决定密度/速度/颜色梯度
+  phase: number;    // 横向微摆相位
   warm: boolean;
   age: number;
   life: number;
+  px: number; py: number; pz: number; // 上一帧头部位置（短拖尾）
 }
 
 /** 固定种子 PRNG：让组件在渲染期保持纯函数（随机只在模块构建期发生一次） */
@@ -48,10 +52,13 @@ const DEEP_OCEAN: [number, number, number] = [0.04, 0.14, 0.24];
 const WARM: [number, number, number] = [1.0, 0.46, 0.2];
 const COLD: [number, number, number] = [0.28, 0.66, 1.0];
 
+const DEG2RAD = Math.PI / 180;
+
 /**
- * 球面流场粒子：与平面地图同一套数据（CURRENTS 路径）。
- * 每个粒子沿所属洋流的路径流动，短线段头亮尾淡，强度由 width 决定，
- * 全部粒子合并为一次 draw call 的 LineSegments，60fps 无压力。
+ * 球面流场粒子（带状流体模型）：
+ * 每条洋流不是一条线，而是一个“流带”——粒子按高斯分布铺在中心线两侧，
+ * 核心带粒子更密、更快、更亮，边缘更稀、更慢、更淡；粒子带短拖尾沿球面流动。
+ * 与平面地图同一套 CURRENTS 数据，全部粒子合并为一次 draw call 的 LineSegments。
  */
 function CurrentFlow() {
   const items = useMemo<FlowItem[]>(() => {
@@ -63,32 +70,38 @@ function CurrentFlow() {
       if (total < 4) continue;
       const span = c.width ?? 1;
       const strength = 0.55 + span * 0.55;
-      // 强洋流：更快、轨迹更长、粒子更密
-      const n = Math.min(460, Math.max(8, Math.round((total / 1.3) * (0.7 + span * 0.5))));
+      // 流带半宽随洋流强弱变化（度）；核心带密度 ∝ 长度 × 宽度
+      const band = 1.5 + span * 2.1;
+      const n = Math.min(900, Math.max(12, Math.round((total / 1.15) * (0.8 + span * 0.6))));
       for (let i = 0; i < n; i++) {
-        const life = 7 + rnd() * 11;
+        const life = 6 + rnd() * 10;
         list.push({
           sp,
           s: rnd() * total,
-          speed: (2.6 + 2.5 * strength) * (0.75 + rnd() * 0.5),
-          len: 3.0 + rnd() * 5.0,
+          speed: (2.4 + 2.4 * strength) * (0.75 + rnd() * 0.5),
+          len: 2.4 + rnd() * 4.6,
+          band,
+          edge: Math.max(-2, Math.min(2, (rnd() + rnd() + rnd() - 1.5) / 0.5)),
+          phase: rnd() * Math.PI * 2,
           warm: c.type === 'warm',
           age: rnd() * life,
           life,
+          px: 0, py: 0, pz: 0,
         });
       }
-      if (list.length >= 3400) break;
+      if (list.length >= 5400) break;
     }
-    return list.slice(0, 3400);
+    return list.slice(0, 5400);
   }, []);
 
+  // 每个粒子 4 个顶点：头部/尾部（流线短段）+ 上一帧位置（淡出拖尾）
   const posAttr = useMemo(() => {
-    const a = new THREE.BufferAttribute(new Float32Array(items.length * 6), 3);
+    const a = new THREE.BufferAttribute(new Float32Array(items.length * 12), 3);
     a.setUsage(THREE.DynamicDrawUsage);
     return a;
   }, [items]);
   const colAttr = useMemo(
-    () => new THREE.BufferAttribute(new Float32Array(items.length * 6), 3),
+    () => new THREE.BufferAttribute(new Float32Array(items.length * 12), 3),
     [items],
   );
   const geo = useMemo(() => {
@@ -109,8 +122,11 @@ function CurrentFlow() {
     [],
   );
 
-  const tmpV1 = useMemo(() => new THREE.Vector3(), []);
-  const tmpV2 = useMemo(() => new THREE.Vector3(), []);
+  const tmpN = useMemo(() => new THREE.Vector3(), []);
+  const tmpT = useMemo(() => new THREE.Vector3(), []);
+  const tmpP = useMemo(() => new THREE.Vector3(), []);
+  const tmpA = useMemo(() => new THREE.Vector3(), []);
+  const tmpB = useMemo(() => new THREE.Vector3(), []);
 
   useFrame((_, delta) => {
     const d = Math.min(delta, 0.05);
@@ -118,34 +134,68 @@ function CurrentFlow() {
     const col = colAttr.array as Float32Array;
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
+      const total = it.sp.total;
       it.age += d;
       if (it.age > it.life) {
         it.age = 0;
-        it.s = Math.random() * it.sp.total;
+        it.s = Math.random() * total;
       }
-      it.s += it.speed * d;
-      const total = it.sp.total;
+      const escape = Math.min(1, Math.abs(it.edge) / 2);
+      // 边缘粒子更慢（速度梯度）
+      it.s += it.speed * (1 - 0.35 * escape * escape) * d;
       if (it.s >= total) it.s -= total;
-      const s2 = it.s + it.len;
-      const [l1, t1] = pointAt(it.sp, it.s);
-      const [l2, t2] = pointAt(it.sp, s2 >= total ? s2 - total : s2);
-      lngLatToVec(l1, t1, FLOW_R, tmpV1);
-      lngLatToVec(l2, t2, FLOW_R, tmpV2);
-      const o = i * 6;
-      pos[o] = tmpV1.x; pos[o + 1] = tmpV1.y; pos[o + 2] = tmpV1.z;
-      pos[o + 3] = tmpV2.x; pos[o + 4] = tmpV2.y; pos[o + 5] = tmpV2.z;
-      // 生命周期淡入淡出 + 头亮尾淡（尾色偏向深海蓝）
+
+      // 中心流线上的两个点 → 球面切向
+      const [a1, b1] = pointAt(it.sp, it.s);
+      const sn = it.s + 1.4 >= total ? it.s + 1.4 - total : it.s + 1.4;
+      const [a2, b2] = pointAt(it.sp, sn);
+      lngLatToVec(a1, b1, 1, tmpN);
+      lngLatToVec(a2, b2, 1, tmpT);
+      tmpT.sub(tmpN);
+      // 切向投影到球面切平面
+      const ndot = tmpT.dot(tmpN);
+      tmpT.x -= tmpN.x * ndot;
+      tmpT.y -= tmpN.y * ndot;
+      tmpT.z -= tmpN.z * ndot;
+      tmpT.normalize();
+      // 球面法线方向上的横向基（在球面上垂直流向）
+      tmpP.crossVectors(tmpN, tmpT).normalize();
+
+      // 高斯横向偏移 + 沿路径的微摆 → 形成有宽度的流带
+      const lateral = (it.edge * it.band + Math.sin(it.s * 0.21 + it.phase) * 0.8) * DEG2RAD;
+      tmpN.addScaledVector(tmpP, lateral).normalize();
+
+      // 流线短段（贴合球面曲率）
+      const halfLen = (it.len * 0.5) * DEG2RAD;
+      tmpA.copy(tmpN).addScaledVector(tmpT, halfLen).multiplyScalar(FLOW_R);
+      tmpB.copy(tmpN).addScaledVector(tmpT, -halfLen).multiplyScalar(FLOW_R);
+
+      const o = i * 12;
+      pos[o] = tmpA.x; pos[o + 1] = tmpA.y; pos[o + 2] = tmpA.z;       // 头部（亮）
+      pos[o + 3] = tmpB.x; pos[o + 4] = tmpB.y; pos[o + 5] = tmpB.z;   // 尾部（淡）
+      pos[o + 6] = it.px; pos[o + 7] = it.py; pos[o + 8] = it.pz;      // 上一帧位置（拖尾）
+      pos[o + 9] = tmpA.x; pos[o + 10] = tmpA.y; pos[o + 11] = tmpA.z; // 拖尾终点（头部）
+      it.px = tmpA.x; it.py = tmpA.y; it.pz = tmpA.z;
+
+      // 生命周期淡入淡出 + 边缘渐变（核心亮、边缘暗）+ 头亮尾淡
       const fi = Math.min(1, it.age / 0.9);
       const fo = Math.min(1, (it.life - it.age) / 2.2);
       const f = Math.max(0, Math.min(fi, fo));
-    const base = it.warm ? WARM : COLD;
-      const hx = Math.min(1, base[0] * (0.72 + 0.28 * f));
-      const hy = Math.min(1, base[1] * (0.72 + 0.28 * f));
-      const hz = Math.min(1, base[2] * (0.72 + 0.28 * f));
+      const edgeFade = 1 - 0.42 * escape * escape;
+      const base = it.warm ? WARM : COLD;
+      const hx = Math.min(1, base[0] * (0.68 + 0.32 * f) * edgeFade);
+      const hy = Math.min(1, base[1] * (0.68 + 0.32 * f) * edgeFade);
+      const hz = Math.min(1, base[2] * (0.68 + 0.32 * f) * edgeFade);
       col[o] = hx; col[o + 1] = hy; col[o + 2] = hz;
       col[o + 3] = hx + (DEEP_OCEAN[0] - hx) * 0.62;
       col[o + 4] = hy + (DEEP_OCEAN[1] - hy) * 0.62;
       col[o + 5] = hz + (DEEP_OCEAN[2] - hz) * 0.62;
+      col[o + 6] = hx + (DEEP_OCEAN[0] - hx) * 0.78;
+      col[o + 7] = hy + (DEEP_OCEAN[1] - hy) * 0.78;
+      col[o + 8] = hz + (DEEP_OCEAN[2] - hz) * 0.78;
+      col[o + 9] = hx + (DEEP_OCEAN[0] - hx) * 0.55;
+      col[o + 10] = hy + (DEEP_OCEAN[1] - hy) * 0.55;
+      col[o + 11] = hz + (DEEP_OCEAN[2] - hz) * 0.55;
     }
     posAttr.needsUpdate = true;
     colAttr.needsUpdate = true;
