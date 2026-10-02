@@ -1079,13 +1079,20 @@ class MapEngine {
     const ids = this.opts.currentIds?.length ? this.opts.currentIds : CURRENTS.map((c) => c.id);
     const lod = this.lodK();
     const subset = !!this.opts.currentIds?.length; // 子图（档案馆/实验）保留全部标签
+    const showEn = this.view.scale > 3.2;
+    type Lbl = {
+      id: string; x: number; y: number; tw: number; bh: number;
+      fs: number; col: string; alpha: number; name: string; en?: string;
+      major: boolean; active: boolean;
+    };
+    const items: Lbl[] = [];
+    // 第一遍：收集可见标签（全局视图也显示全部名称；缩得很小才隐藏次要洋流）
     for (const id of ids) {
       const c = CURRENT_MAP[id];
       if (!c) continue;
       const active = this.opts.selectedId === c.id;
       const major = MAJOR_IDS.has(id);
-      // 全球页默认只显示主要洋流；放大后其余洋流逐步出现；选中/交互总是显示
-      if (!active && !major && !subset && lod < 1.9) continue;
+      if (!active && !subset && lod < 0.8) continue;
       if (this.opts.labelsOnlySelected && !active) continue;
       const p = pathOf(c, season);
       const anchor = p[Math.floor(p.length * 0.5)];
@@ -1095,31 +1102,64 @@ class MapEngine {
       const fs = 11.5 * scaleK;
       const col = typeColor(seasonalType(c, season));
       const dimmed = this.opts.dimUnselected && this.opts.selectedId && c.id !== this.opts.selectedId;
-      const alpha = active ? 1 : (dimmed ? 0.3 : 0.82);
+      const alpha = active ? 1 : (dimmed ? 0.3 : (major ? 0.82 : 0.72));
       ctx.font = '600 ' + fs + 'px "PingFang SC", sans-serif';
       const name = c.nameZh + (c.seasonal ? (season === 'summer' ? '（夏）' : '（冬）') : '');
       const tw = ctx.measureText(name).width;
-      const padX = 7;
       const bh = fs + 8;
+      const en = showEn && !active && (major || subset || lod >= 1.9) ? c.nameEn.slice(0, 26) : undefined;
+      items.push({ id, x, y, tw, bh, fs, col, alpha, name, en, major, active });
+    }
+    // 第二遍：碰撞避免。选中 > 主要 > 其余；撞到已放置标签就上下错开，
+    // 让相近的暖流/寒流标签能同时显示，而不是挤在一起盖住彼此
+    items.sort((a, b) =>
+      ((a.active ? 0 : a.major ? 1 : 2) - (b.active ? 0 : b.major ? 1 : 2)) || a.y - b.y);
+    const padX = 7;
+    const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
+    const overlaps = (it: Lbl, dy: number, enH: number) => {
+      const x0 = it.x - it.tw / 2 - padX, x1 = it.x + it.tw / 2 + padX;
+      const y0 = it.y + dy - it.bh / 2, y1 = it.y + dy + it.bh / 2 + enH;
+      for (const pl of placed) {
+        if (x0 < pl.x1 && x1 > pl.x0 && y0 < pl.y1 && y1 > pl.y0) return true;
+      }
+      return false;
+    };
+    for (const it of items) {
+      const enH = it.en ? it.fs * 0.62 + 5 : 0;
+      let dy = 0;
+      let ok = it.active;
+      if (!ok) {
+        // 先试原位，再依次往上/下错开，最多 ±4 档
+        for (const step of [0, 1, -1, 2, -2, 3, -3, 4, -4]) {
+          const off = step * (it.bh + 2) * 0.85;
+          if (!overlaps(it, off, enH)) { dy = off; ok = true; break; }
+        }
+      }
+      if (!ok) continue; // 实在放不下（高优先级标签占了位置）就不再画，避免叠字
+      const { x, y, tw, bh, fs, col, alpha, name } = it;
       ctx.globalAlpha = alpha;
       ctx.fillStyle = 'rgba(5, 24, 41, 0.66)';
       ctx.beginPath();
-      ctx.roundRect(x - tw / 2 - padX, y - bh / 2, tw + padX * 2, bh, 6);
+      ctx.roundRect(x - tw / 2 - padX, y + dy - bh / 2, tw + padX * 2, bh, 6);
       ctx.fill();
-      if (active) {
+      if (it.active) {
         ctx.strokeStyle = col;
         ctx.lineWidth = 1;
         ctx.stroke();
       }
       ctx.fillStyle = col;
-      ctx.fillText(name, x - tw / 2, y + fs * 0.34);
+      ctx.font = '600 ' + fs + 'px "PingFang SC", sans-serif';
+      ctx.fillText(name, x - tw / 2, y + dy + fs * 0.34);
       ctx.globalAlpha = 1;
-      // 英文小字（主要/选中/子图或放大时）
-      if (this.view.scale > 3.2 && !active && (major || subset || lod >= 1.9)) {
+      if (it.en) {
         ctx.font = '500 ' + (fs * 0.62) + 'px sans-serif';
         ctx.fillStyle = 'rgba(140, 180, 215, 0.5)';
-        ctx.fillText(c.nameEn.slice(0, 26), x - tw / 2, y + bh / 2 + fs * 0.62);
+        ctx.fillText(it.en, x - tw / 2, y + dy + bh / 2 + fs * 0.62);
       }
+      placed.push({
+        x0: x - tw / 2 - padX, x1: x + tw / 2 + padX,
+        y0: y + dy - bh / 2, y1: y + dy + bh / 2 + enH,
+      });
     }
   }
 
@@ -1186,13 +1226,14 @@ export const OceanMap = forwardRef<OceanMapHandle, OceanMapProps>(function Ocean
     ro.observe(wrap);
 
     const onWheel = (e: WheelEvent) => {
+      // 普通滚轮/触控板双指上下滑 = 页面滚动（好让用户滚到地图下方的正文）；
+      // 只有 ctrlKey 事件（Chrome/Edge 触控板双指捏合缩放）才缩放地图
+      if (!e.ctrlKey) return;
       e.preventDefault();
       const r = wrap.getBoundingClientRect();
       const x = e.clientX - r.left;
       const y = e.clientY - r.top;
-      // ctrlKey 事件是 Chrome/Edge 触控板双指缩放的投递方式，普通滚轮/触控板滚动同一通道
-      const k = e.ctrlKey ? 0.006 : 0.0042;
-      engine.zoomBy(Math.exp(-e.deltaY * k), x, y);
+      engine.zoomBy(Math.exp(-e.deltaY * 0.006), x, y);
     };
     // Safari 触控板双指缩放走 GestureEvent（累积 scale），逐帧换算成增量缩放
     let lastGestureScale = 1;
@@ -1211,8 +1252,8 @@ export const OceanMap = forwardRef<OceanMapHandle, OceanMapProps>(function Ocean
       engine.zoomBy(ge.scale / lastGestureScale, r.width / 2, r.height / 2);
       lastGestureScale = ge.scale;
     };
-    // 触屏设备：禁止浏览器原生页面缩放，全部交给地图
-    wrap.style.touchAction = 'none';
+    // 触屏设备：允许页面滚动；地图缩放用捏合手势/缩放按钮
+    wrap.style.touchAction = 'pan-x pan-y';
     const onDown = (e: PointerEvent) => {
       const r = wrap.getBoundingClientRect();
       engine.pointerDown(e.clientX - r.left, e.clientY - r.top);
