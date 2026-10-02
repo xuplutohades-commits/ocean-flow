@@ -158,6 +158,8 @@ class MapEngine {
   base: HTMLCanvasElement;
   view: View = { lng0: -180, lat0: 90, scale: 3 };
   target: View | null = null;
+  /** 高倍放大后的一次性吸附标志：只在“从聚焦状态缩回”时生效一次 */
+  zoomedOutSnap = false;
   animT = 0;
   flowDots: FlowDot[] = [];
   fieldSegs: FlowSegment[] = [];
@@ -398,6 +400,7 @@ class MapEngine {
       lng0: clng - this.w / (2 * scale),
       lat0: clat + this.h / (2 * scale),
     };
+    this.zoomedOutSnap = true;
   }
 
   setView(region: { center: [number, number]; zoom?: number }) {
@@ -416,10 +419,13 @@ class MapEngine {
     this.view.scale = clamp(this.view.scale * f, 0.7, 320);
     this.view.lng0 = lng - cx / this.view.scale;
     this.view.lat0 = lat + cy / this.view.scale;
-    // 缩到接近全局视野时直接吸附回“最初状态”，无需一直滑到尽头
+    // 只在“高倍放大后缩回”时吸附一次到初始视野；
+    // 平时在全局视野附近可以继续缩小，不会被卡住
     const globalScale = Math.min(this.w / 360, this.h / 180) * 0.96;
-    if (f < 1 && this.view.scale <= globalScale * 1.18) {
+    if (this.view.scale > globalScale * 1.4) this.zoomedOutSnap = true;
+    if (f < 1 && this.zoomedOutSnap && this.view.scale <= globalScale * 1.18) {
       this.view = this.fitWorld();
+      this.zoomedOutSnap = false;
     }
     this.redrawBase();
   }
