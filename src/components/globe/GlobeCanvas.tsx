@@ -137,8 +137,8 @@ function spawnParticle(ff: FlowField, rnd: () => number, freshAge: boolean): Flo
   };
 }
 
-const FLOW_VS = 'attribute float aAlpha; varying vec3 vColor; varying float vAlpha; void main() { vColor = color; vAlpha = aAlpha; vec4 mv = modelViewMatrix * vec4(position, 1.0); gl_Position = projectionMatrix * mv; float facing = clamp(dot(normalize(position), normalize(cameraPosition)), 0.0, 1.0); vAlpha *= 0.4 + 0.6 * facing; }';
-const FLOW_FS = 'varying vec3 vColor; varying float vAlpha; uniform float uOpacity; void main() { gl_FragColor = vec4(vColor, vAlpha * uOpacity); }';
+/** 尾迹淡出的目标色调：等离子流拖尾逐渐溶入深海水色 */
+const DEEP_TONE: [number, number, number] = [0.05, 0.14, 0.24];
 
 /**
  * 全球洋流平流粒子场：
@@ -170,27 +170,19 @@ function CurrentFlow() {
     () => new THREE.BufferAttribute(new Float32Array(items.length * segV * 3), 3),
     [items, segV],
   );
-  const alpAttr = useMemo(
-    () => new THREE.BufferAttribute(new Float32Array(items.length * segV), 1),
-    [items, segV],
-  );
   const geo = useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', posAttr);
     g.setAttribute('color', colAttr);
-    g.setAttribute('aAlpha', alpAttr);
     return g;
-  }, [posAttr, colAttr, alpAttr]);
+  }, [posAttr, colAttr]);
   const mat = useMemo(
     () =>
-      new THREE.ShaderMaterial({
-        uniforms: { uOpacity: { value: 0.9 } },
+      new THREE.LineBasicMaterial({
         vertexColors: true,
         transparent: true,
+        opacity: 0.95,
         depthWrite: false,
-        blending: THREE.NormalBlending,
-        vertexShader: FLOW_VS,
-        fragmentShader: FLOW_FS,
       }),
     [],
   );
@@ -204,7 +196,6 @@ function CurrentFlow() {
     if (!items.length) return;
     const pos = posAttr.array as Float32Array;
     const col = colAttr.array as Float32Array;
-    const alp = alpAttr.array as Float32Array;
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
       const ff = it.ff;
@@ -296,21 +287,20 @@ function CurrentFlow() {
         pos[vx + 3] = vb.x; pos[vx + 4] = vb.y; pos[vx + 5] = vb.z;
         const wA = TRAIL_W[kk];
         const wB = TRAIL_W[kk + 1];
-        const cfA = 0.45 + 0.55 * wA;
-        const cfB = 0.45 + 0.55 * wB;
-        col[vx] = Math.min(1, base[0] * cfA * tint);
-        col[vx + 1] = Math.min(1, base[1] * cfA * tint);
-        col[vx + 2] = Math.min(1, base[2] * cfA * tint);
-        col[vx + 3] = Math.min(1, base[0] * cfB * tint);
-        col[vx + 4] = Math.min(1, base[1] * cfB * tint);
-        col[vx + 5] = Math.min(1, base[2] * cfB * tint);
-        alp[o + kk * 2] = wA * alpha;
-        alp[o + kk * 2 + 1] = wB * alpha;
+        const cfA = (0.45 + 0.55 * wA) * tint;
+        const cfB = (0.45 + 0.55 * wB) * tint;
+        const eA = wA * alpha; // 有效透明度：淡出端向海面色调靠拢
+        const eB = wB * alpha;
+        col[vx] = base[0] * cfA * eA + DEEP_TONE[0] * (1 - eA);
+        col[vx + 1] = base[1] * cfA * eA + DEEP_TONE[1] * (1 - eA);
+        col[vx + 2] = base[2] * cfA * eA + DEEP_TONE[2] * (1 - eA);
+        col[vx + 3] = base[0] * cfB * eB + DEEP_TONE[0] * (1 - eB);
+        col[vx + 4] = base[1] * cfB * eB + DEEP_TONE[1] * (1 - eB);
+        col[vx + 5] = base[2] * cfB * eB + DEEP_TONE[2] * (1 - eB);
       }
     }
     posAttr.needsUpdate = true;
     colAttr.needsUpdate = true;
-    alpAttr.needsUpdate = true;
   });
 
   return <lineSegments geometry={geo} material={mat} frustumCulled={false} />;
