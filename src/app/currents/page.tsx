@@ -61,7 +61,7 @@ function CurrentDetail({ c, season, onFocus, onClear }: {
         </div>
       )}
       <div className="rounded-[10px] border border-[rgba(111,227,224,0.22)] bg-[rgba(111,227,224,0.06)] p-3">
-        <div className="kicker-dim mb-1">教材衔接</div>
+        <div className="kicker-dim mb-1">知识衔接</div>
         <p className="text-[12px] leading-relaxed text-[#c9e4e2]">{c.textbook}</p>
       </div>
       <button className="btn btn-primary w-full" onClick={() => onFocus(c.id)}>在地图上定位这条洋流 ◎</button>
@@ -101,6 +101,7 @@ export default function CurrentsPage() {
   const [dense, setDense] = useState(1);
   const [speed, setSpeed] = useState(1);
   const [step, setStep] = useState(0);
+  const [catalogOpen, setCatalogOpen] = useState(true);
   const mapRef = useRef<OceanMapHandle>(null);
 
   const selected = selectedId ? CURRENT_MAP[selectedId] : null;
@@ -125,10 +126,10 @@ export default function CurrentsPage() {
   }, []);
 
   return (
-    <div style={{ paddingTop: 76 }}>
+    <div>
       <div className="relative">
         {/* 地图主体 */}
-        <div className="map-shell" style={{ height: 'calc(100vh - 76px)', borderRadius: 0 }}>
+        <div className="map-shell" style={{ height: '100vh', borderRadius: 0 }}>
           <OceanMap
             ref={mapRef}
             season={season}
@@ -142,7 +143,7 @@ export default function CurrentsPage() {
             onSelect={handleSelect}
           />
           {/* 顶部标题 */}
-          <div className="absolute top-4 left-5 right-5 flex items-start justify-between gap-3 pointer-events-none z-10">
+          <div className="absolute top-[72px] left-5 right-5 flex items-start justify-between gap-3 pointer-events-none z-10">
             <div>
               <div className="kicker">MODULE 01 · GLOBAL CURRENTS</div>
               <h1 className="title-disp text-[22px] md:text-[28px] mt-1 grad-text">全球洋流</h1>
@@ -200,7 +201,7 @@ export default function CurrentsPage() {
           {mode === 'teach' && (
             <div className="absolute left-5 top-24 bottom-40 w-[300px] hidden xl:block z-20">
               <Panel className="p-4 h-full flex flex-col">
-                <div className="kicker text-[10px] mb-3">TEACHING FLOW · 跟着教材走</div>
+                <div className="kicker text-[10px] mb-3">TEACHING FLOW · 分步教学</div>
                 <div className="space-y-2 overflow-y-auto scroll-thin flex-1">
                   {TEACH_STEPS.map((s, i) => (
                     <button key={i}
@@ -216,15 +217,19 @@ export default function CurrentsPage() {
             </div>
           )}
 
-          {/* 右侧信息面板 */}
-          <div className="absolute top-20 right-4 w-[340px] max-w-[90vw] z-30" style={{ maxHeight: 'calc(100vh - 240px)' }}>
+          {/* 右侧信息面板（可收起） */}
+          <div className="absolute right-0 top-[84px] z-30 flex justify-end items-start" style={{ maxHeight: 'calc(100vh - 240px)' }}>
             {selected ? (
-              <Panel className="h-full">
+              <Panel className="h-full w-[340px] max-w-[90vw] mr-4">
                 <CurrentDetail c={selected} season={season} onFocus={handleFocus} onClear={() => handleSelect(null)} />
               </Panel>
-            ) : (
-              <Panel className="p-4">
-                <div className="kicker text-[10px]">CURRENT CATALOG · 教材洋流</div>
+            ) : catalogOpen ? (
+              <Panel className="p-4 w-[340px] max-w-[90vw] mr-4">
+                <div className="flex items-center justify-between gap-2">
+                  <div className="kicker text-[10px]">CURRENT CATALOG · 洋流</div>
+                  <button onClick={() => setCatalogOpen(false)} aria-label="收起洋流目录"
+                    className="w-6 h-6 flex-none rounded-lg border border-[rgba(100,200,220,0.18)] bg-[rgba(10,32,52,0.5)] text-[#8ba7c6] hover:text-white text-[13px] leading-none">›</button>
+                </div>
                 <div className="mt-3 space-y-2.5 max-h-[46vh] overflow-y-auto scroll-thin pr-1">
                   {Object.entries(oceanGroups).map(([ocean, ids]) => (
                     <div key={ocean}>
@@ -245,8 +250,14 @@ export default function CurrentsPage() {
                     </div>
                   ))}
                 </div>
-                <div className="mt-3 text-[11px] text-[#5f7b99]">共 {CURRENTS.length} 条教材范围洋流（含冬夏两套路径的季风海流）。</div>
+                <div className="mt-3 text-[11px] text-[#5f7b99]">共 {CURRENTS.length} 条洋流（含冬夏两套路径的季风海流）。</div>
               </Panel>
+            ) : (
+              <button onClick={() => setCatalogOpen(true)} aria-label="展开洋流目录"
+                className="flex items-center gap-1.5 rounded-l-xl px-3 py-3 text-[12.5px] font-semibold text-[#a9c3de] hover:text-white transition-colors"
+                style={{ background: 'rgba(5,25,40,0.85)', border: '1px solid rgba(100,200,220,0.2)', borderRight: 'none', backdropFilter: 'blur(8px)' }}>
+                <span className="text-[13px] leading-none">◂</span>洋流
+              </button>
             )}
           </div>
         </div>

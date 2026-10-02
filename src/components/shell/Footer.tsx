@@ -9,7 +9,7 @@ export default function Footer() {
         <div className="max-w-md">
           <div className="text-[15px] font-bold tracking-wide">OCEAN FLOW <span className="ml-2 text-[13px] font-normal text-[#8ba7c6]">高中地理 · 洋流互动实验室</span></div>
           <p className="mt-3 text-[12.5px] leading-relaxed text-[#5f7b99]">
-            面向高中地理课堂的交互式海洋实验室。内容围绕教材范围：世界洋流分布规律、暖流与寒流、洋流形成机制及其对气候、渔场、航海与污染的影响。
+            面向高中地理课堂的交互式海洋实验室。内容涵盖：世界洋流分布规律、暖流与寒流、洋流形成机制及其对气候、渔场、航海与污染的影响。
             所有模拟均为教学简化模型，用于理解概念而非预报。
           </p>
         </div>

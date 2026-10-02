@@ -416,6 +416,11 @@ class MapEngine {
     this.view.scale = clamp(this.view.scale * f, 0.7, 320);
     this.view.lng0 = lng - cx / this.view.scale;
     this.view.lat0 = lat + cy / this.view.scale;
+    // 缩到接近全局视野时直接吸附回“最初状态”，无需一直滑到尽头
+    const globalScale = Math.min(this.w / 360, this.h / 180) * 0.96;
+    if (f < 1 && this.view.scale <= globalScale * 1.18) {
+      this.view = this.fitWorld();
+    }
     this.redrawBase();
   }
 
@@ -1173,7 +1178,9 @@ export const OceanMap = forwardRef<OceanMapHandle, OceanMapProps>(function Ocean
       const r = wrap.getBoundingClientRect();
       const x = e.clientX - r.left;
       const y = e.clientY - r.top;
-      engine.zoomBy(Math.exp(-e.deltaY * 0.0011), x, y);
+      // 触控板双指缩放事件带 ctrlKey，灵敏度更高；普通滚轮 3.5x 提速
+      const k = e.ctrlKey ? 0.007 : 0.0038;
+      engine.zoomBy(Math.exp(-e.deltaY * k), x, y);
     };
     const onDown = (e: PointerEvent) => {
       const r = wrap.getBoundingClientRect();
