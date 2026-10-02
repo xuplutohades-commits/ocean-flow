@@ -248,13 +248,14 @@ input[type="range"].slider::-moz-range-thumb {
   mix-blend-mode: overlay;
 }
 
-/* 地图容器通用 */
+/* 地图容器通用：浅色“纸面”风格；height:100% 保证画布撑满父容器 */
 .map-shell {
   position: relative; overflow: hidden;
+  width: 100%; height: 100%;
   background:
-    radial-gradient(120% 90% at 50% 0%, rgba(12, 46, 84, 0.55), transparent 60%),
-    radial-gradient(90% 70% at 85% 100%, rgba(4, 16, 32, 0.9), transparent 65%),
-    linear-gradient(180deg, #030d1c 0%, #04203a 100%);
+    radial-gradient(120% 90% at 50% 0%, rgba(255, 255, 255, 0.35), transparent 60%),
+    radial-gradient(90% 70% at 85% 100%, rgba(190, 214, 232, 0.5), transparent 65%),
+    linear-gradient(180deg, #dfeaf3 0%, #c4dcec 100%);
 }
 .map-shell canvas { display: block; width: 100%; height: 100%; touch-action: none; }
 

@@ -1,93 +1,106 @@
 {
   "globalWake": {
-    "url": "https://images-assets.nasa.gov/image/sl4-137-3655/sl4-137-3655~large.jpg",
+    "url": "/images/globalWake.jpg",
     "caption": "卫星俯瞰新西兰以南：洋流经过岛屿时留下的涡旋尾迹",
     "source": "NASA Image and Video Library",
     "pageUrl": "https://images.nasa.gov/details/sl4-137-3655",
-    "license": "公有领域，使用需注明来源 NASA"
+    "license": "公有领域，使用需注明来源 NASA",
+    "local": true
   },
   "kuroshioSeaLevel": {
-    "url": "https://images-assets.nasa.gov/image/PIA26100/PIA26100~large.jpg",
+    "url": "/images/kuroshioSeaLevel.jpg",
     "caption": "SWOT 卫星全球海面高度（2023）——海面起伏勾勒出大洋环流的走向",
     "source": "NASA/JPL-Caltech SWOT 任务",
     "pageUrl": "https://images.nasa.gov/details/PIA26100",
-    "license": "公有领域，使用需注明来源 NASA/JPL-Caltech"
+    "license": "公有领域，使用需注明来源 NASA/JPL-Caltech",
+    "local": true
   },
   "pacificSeaLevel": {
-    "url": "https://images-assets.nasa.gov/image/PIA05071/PIA05071~orig.jpg",
+    "url": "/images/pacificSeaLevel.jpg",
     "caption": "Jason 卫星测得的太平洋海面高度异常：信风把海水推向西太平洋，海面西高东低",
     "source": "NASA/JPL Ocean Surface Topography Team",
     "pageUrl": "https://images.nasa.gov/details/PIA05071",
-    "license": "公有领域，使用需注明来源 NASA/JPL"
+    "license": "公有领域，使用需注明来源 NASA/JPL",
+    "local": true
   },
   "atacamaCoast": {
-    "url": "https://images-assets.nasa.gov/image/iss074e0315662/iss074e0315662~large.jpg",
+    "url": "/images/atacamaCoast.jpg",
     "caption": "国际空间站拍摄：秘鲁南部太平洋沿岸的阿塔卡马沙漠——寒流笼罩下的世界上最干旱地区之一",
     "source": "NASA（ISS 宇航员摄影）",
     "pageUrl": "https://images.nasa.gov/details/iss074e0315662",
-    "license": "公有领域，使用需注明来源 NASA"
+    "license": "公有领域，使用需注明来源 NASA",
+    "local": true
   },
   "namibDesert": {
-    "url": "https://images-assets.nasa.gov/image/PIA17632/PIA17632~large.jpg",
+    "url": "/images/namibDesert.jpg",
     "caption": "Terra 卫星：纳米布沙漠，一条与海洋平行的沿岸沙漠",
     "source": "NASA/GSFC/METI/ERSDAC/JAROS 与美日 ASTER 科学组",
     "pageUrl": "https://images.nasa.gov/details/PIA17632",
-    "license": "公有领域，使用需注明来源 NASA"
+    "license": "公有领域，使用需注明来源 NASA",
+    "local": true
   },
   "gulfStreamPerpetual": {
-    "url": "https://images-assets.nasa.gov/image/GSFC_20171208_Archive_e001761/GSFC_20171208_Archive_e001761~large.jpg",
+    "url": "/images/gulfStreamPerpetual.jpg",
     "caption": "NASA “永恒之洋”可视化：墨西哥湾暖流像一条高速公路伸向北大西洋",
     "source": "NASA GSFC（Perpetual Ocean，基于 ECCO 模型）",
     "pageUrl": "https://images.nasa.gov/details/GSFC_20171208_Archive_e001761",
-    "license": "公有领域，使用需注明来源 NASA"
+    "license": "公有领域，使用需注明来源 NASA",
+    "local": true
   },
   "cloudStreets": {
-    "url": "https://images-assets.nasa.gov/image/GSFC_20171208_Archive_e001264/GSFC_20171208_Archive_e001264~large.jpg",
+    "url": "/images/cloudStreets.jpg",
     "caption": "寒冷的陆风经过温暖的大西洋：云街揭示了海洋向大气输送热量的通道",
     "source": "NASA GSFC（MODIS 影像）",
     "pageUrl": "https://images.nasa.gov/details/GSFC_20171208_Archive_e001264",
-    "license": "公有领域，使用需注明来源 NASA"
+    "license": "公有领域，使用需注明来源 NASA",
+    "local": true
   },
   "tabularIceberg": {
-    "url": "https://images-assets.nasa.gov/image/sts048-73-000q/sts048-73-000q~large.jpg",
+    "url": "/images/tabularIceberg.jpg",
     "caption": "南大西洋的桌状冰山：寒流是冰山漂向中低纬度的“传送带”",
     "source": "NASA（STS-48 航天飞机摄影）",
     "pageUrl": "https://images.nasa.gov/details/sts048-73-000q",
-    "license": "公有领域，使用需注明来源 NASA"
+    "license": "公有领域，使用需注明来源 NASA",
+    "local": true
   },
   "deepwaterOil": {
-    "url": "https://images-assets.nasa.gov/image/PIA13099/PIA13099~orig.jpg",
+    "url": "/images/deepwaterOil.jpg",
     "caption": "2010 年 5 月 1 日 Terra 卫星 MISR 影像：墨西哥湾“深水地平线”漏油在洋流作用下扩散",
     "source": "NASA/GSFC/LaRC/JPL，MISR 团队",
     "pageUrl": "https://images.nasa.gov/details/PIA13099",
-    "license": "公有领域，使用需注明来源 NASA"
+    "license": "公有领域，使用需注明来源 NASA",
+    "local": true
   },
   "arabianBloom": {
-    "url": "https://images-assets.nasa.gov/image/PIA04369/PIA04369~orig.jpg",
+    "url": "/images/arabianBloom.jpg",
     "caption": "阿拉伯海“红色浮游生物”：每年夏季西南季风驱动的上升流带来营养盐，引发海洋浮游植物总爆发",
     "source": "NASA（SeaWiFS 影像）",
     "pageUrl": "https://images.nasa.gov/details/PIA04369",
-    "license": "公有领域，使用需注明来源 NASA"
+    "license": "公有领域，使用需注明来源 NASA",
+    "local": true
   },
   "ensoAtmosphere": {
-    "url": "https://images-assets.nasa.gov/image/PIA12961/PIA12961~orig.jpg",
+    "url": "/images/ensoAtmosphere.jpg",
     "caption": "Aura 卫星观测到的厄尔尼诺对大气的影响：海温异常通过沃克环流扰动全球天气",
     "source": "NASA/JPL（Aura 任务）",
     "pageUrl": "https://images.nasa.gov/details/PIA12961",
-    "license": "公有领域，使用需注明来源 NASA"
+    "license": "公有领域，使用需注明来源 NASA",
+    "local": true
   },
   "northAtlanticBloom": {
-    "url": "https://images-assets.nasa.gov/image/GSFC_20171208_Archive_e001418/GSFC_20171208_Archive_e001418~orig.jpg",
+    "url": "/images/northAtlanticBloom.jpg",
     "caption": "北大西洋的浮游植物大爆发：营养盐 + 光照 + 洋流扰动，组成海上牧场的起点",
     "source": "NASA GSFC（MODIS 影像）",
     "pageUrl": "https://images.nasa.gov/details/GSFC_20171208_Archive_e001418",
-    "license": "公有领域，使用需注明来源 NASA"
+    "license": "公有领域，使用需注明来源 NASA",
+    "local": true
   },
   "newfoundlandBloom": {
-    "url": "https://images-assets.nasa.gov/image/GSFC_20171208_Archive_e001997/GSFC_20171208_Archive_e001997~orig.jpg",
+    "url": "/images/newfoundlandBloom.jpg",
     "caption": "纽芬兰近海的浮游植物爆发：拉布拉多寒流与墨西哥湾暖流交汇处的营养盐盛宴",
     "source": "NASA GSFC（MODIS 影像）",
     "pageUrl": "https://images.nasa.gov/details/GSFC_20171208_Archive_e001997",
-    "license": "公有领域，使用需注明来源 NASA"
+    "license": "公有领域，使用需注明来源 NASA",
+    "local": true
   }
 }

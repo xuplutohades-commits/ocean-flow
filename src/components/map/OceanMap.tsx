@@ -6,6 +6,12 @@ import { project, unproject, samplePath, distToPath, pointAt, bboxOf, clamp, typ
 import { pseudoNoise } from '@/lib/noise';
 import type { OceanCurrent, Season, WindArrow } from '@/types';
 
+const T_WARM = '#d14f1c';
+const T_COLD = '#1763a6';
+const T_WARM_TEXT = '#a84417';
+const T_COLD_TEXT = '#135c93';
+const tCol = (warm: boolean) => (warm ? T_WARM : T_COLD);
+
 export interface PollutionSource {
   lng: number;
   lat: number;
@@ -191,25 +197,25 @@ class MapEngine {
     b.clearRect(0, 0, w, h);
     // 海洋底色（跟随视窗的滚动可能有裁剪，这里画满即可）
     const g = b.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, '#04202f');
-    g.addColorStop(0.5, '#032033');
-    g.addColorStop(1, '#021322');
+    g.addColorStop(0, '#dfeaf3');
+    g.addColorStop(0.5, '#d3e4f0');
+    g.addColorStop(1, '#c2d9e9');
     b.fillStyle = g;
     b.fillRect(0, 0, w, h);
-    // 远洋光斑
+    // 柔和光斑
     const spots: [number, number, number][] = [
-      [0.22, 0.28, 0.05], [0.68, 0.4, 0.045], [0.45, 0.75, 0.05], [0.85, 0.2, 0.035],
+      [0.22, 0.28, 0.28], [0.68, 0.4, 0.22], [0.45, 0.75, 0.24], [0.85, 0.2, 0.18],
     ];
     for (const [sx, sy, a] of spots) {
       const rg = b.createRadialGradient(sx * w, sy * h, 0, sx * w, sy * h, 0.45 * Math.min(w, h));
-      rg.addColorStop(0, `rgba(46, 130, 190, ${a})`);
-      rg.addColorStop(1, 'rgba(46,130,190,0)');
+      rg.addColorStop(0, `rgba(255, 255, 255, ${a})`);
+      rg.addColorStop(1, 'rgba(255,255,255,0)');
       b.fillStyle = rg;
       b.fillRect(0, 0, w, h);
     }
     // 网格
     if (this.opts.showGraticule !== false) {
-      b.strokeStyle = 'rgba(126, 190, 255, 0.07)';
+      b.strokeStyle = 'rgba(60, 105, 145, 0.16)';
       b.lineWidth = 1;
       b.beginPath();
       for (let lg = -180; lg <= 180; lg += 30) {
@@ -224,7 +230,7 @@ class MapEngine {
       }
       b.stroke();
       // 赤道与回归线
-      for (const [lt, col] of [[0, 'rgba(111,227,224,0.12)'], [23.4, 'rgba(242,198,109,0.06)'], [-23.4, 'rgba(242,198,109,0.06)']] as const) {
+      for (const [lt, col] of [[0, 'rgba(52, 120, 180, 0.32)'], [23.4, 'rgba(120, 90, 40, 0.12)'], [-23.4, 'rgba(120, 90, 40, 0.12)']] as const) {
         const y = (this.view.lat0 - lt) * this.view.scale;
         b.strokeStyle = col;
         b.beginPath(); b.moveTo(0, y); b.lineTo(w, y); b.stroke();
@@ -232,7 +238,7 @@ class MapEngine {
     }
     // 陆地
     if (this.landReady) {
-      b.fillStyle = '#0a1d31';
+      b.fillStyle = '#f1ebdd';
       for (const poly of this.land) {
         b.beginPath();
         let started = false;
@@ -246,8 +252,8 @@ class MapEngine {
         b.closePath();
         b.fill();
       }
-      // 海岸线微光
-      b.strokeStyle = 'rgba(126, 210, 255, 0.10)';
+      // 海岸线
+      b.strokeStyle = 'rgba(95, 115, 135, 0.5)';
       b.lineWidth = 1;
       for (const poly of this.land) {
         b.beginPath();
@@ -462,45 +468,8 @@ class MapEngine {
     // Ventusky 式方向箭头
     this.drawArrows(ctx, w, h);
 
-    // 粒子
-    for (const p of this.particles) {
-      p.s += p.speed * speedMul * dt;
-      if (p.s > p.sp.total) p.s -= p.sp.total;
-      const pt = pointAt(p.sp, p.s);
-      const [sx, sy] = this.proj(pt[0], pt[1]);
-      const jx = pseudoNoise(this.time * 0.42 + p.seed, 1) * 2.4;
-      const jy = pseudoNoise(this.time * 0.34 + p.seed, 2) * 2.4;
-      const x = sx + jx;
-      const y = sy + jy;
-      p.trail.push({ x, y });
-      if (p.trail.length > 13) p.trail.shift();
-      if (p.trail.length < 2) continue;
-      const cid = this.currentIdOf(p);
-      const col = typeColor(seasonalType(CURRENT_MAP[cid] ?? CURRENTS[0], season));
-      let alpha = 0.55;
-      let lw = 1.4;
-      if (this.opts.selectedId === cid) { alpha = 1; lw = 2.3; }
-      else if (this.opts.dimUnselected && this.opts.selectedId && cid !== this.opts.selectedId) alpha = 0.12;
-      else if (this.hovered === cid) alpha = 0.95;
-      ctx.strokeStyle = col;
-      ctx.globalAlpha = alpha;
-      ctx.lineWidth = lw;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      for (let i = 0; i < p.trail.length; i++) {
-        const t = p.trail[i];
-        if (i === 0) ctx.moveTo(t.x, t.y); else ctx.lineTo(t.x, t.y);
-      }
-      ctx.stroke();
-      // 头部光点
-      const head = p.trail[p.trail.length - 1];
-      ctx.globalAlpha = alpha + 0.25;
-      ctx.fillStyle = col;
-      ctx.beginPath();
-      ctx.arc(head.x, head.y, this.opts.selectedId === cid ? 2.4 : 1.7, 0, Math.PI * 2);
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    }
+    // 流动虚线流线（Ventusky / earth.nullschool 式：一节一节短段沿流向流动）
+    this.drawStreams(ctx, w, h, speedMul);
 
     // 污染扩散点
     for (let i = this.dots.length - 1; i >= 0; i--) {
@@ -647,14 +616,81 @@ class MapEngine {
 
   sampleOwner = new Map<SampledPath, OceanCurrent>();
 
+  /** 沿屏幕距离取折线坐标（二分查找，插值） */
+  atScreen(cum: number[], xs: number[], ys: number[], d: number): [number, number] | null {
+    if (d <= cum[0]) return [xs[0], ys[0]];
+    if (d >= cum[cum.length - 1]) return [xs[xs.length - 1], ys[ys.length - 1]];
+    let lo = 0;
+    let hi = cum.length - 1;
+    while (hi - lo > 1) {
+      const mid = (lo + hi) >> 1;
+      if (cum[mid] <= d) lo = mid;
+      else hi = mid;
+    }
+    const denom = cum[hi] - cum[lo] || 1;
+    const t = (d - cum[lo]) / denom;
+    return [xs[lo] + (xs[hi] - xs[lo]) * t, ys[lo] + (ys[hi] - ys[lo]) * t];
+  }
+
+  /** Ventusky 式“流动虚线”：沿每条洋流点列一节一节短线段，随时间向流向移动 */
+  drawStreams(ctx: CanvasRenderingContext2D, w: number, h: number, speedMul: number) {
+    const dense = this.opts.dense ?? 1;
+    const dashPx = clamp(8 * dense, 6, 24);
+    const gapPx = clamp(16 * dense, 12, 40);
+    const period = dashPx + gapPx;
+    const speed = (this.opts.speed ?? 1) * speedMul * 42; // px/s
+    for (let gi = 0; gi < this.arrowGrid.length; gi++) {
+      const { sp, c } = this.arrowGrid[gi];
+      const col = tCol(c.type === 'warm');
+      const xs: number[] = [];
+      const ys: number[] = [];
+      const cum: number[] = [0];
+      for (let i = 0; i < sp.pts.length; i++) {
+        const [px, py] = this.proj(sp.pts[i][0], sp.pts[i][1]);
+        xs.push(px);
+        ys.push(py);
+        if (i > 0) cum.push(cum[i - 1] + Math.hypot(px - xs[i - 1], py - ys[i - 1]));
+      }
+      const total = cum[cum.length - 1];
+      if (total < dashPx) continue;
+      const phase = (this.time * speed) % period;
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      for (let start = phase - period; start < total + dashPx; start += period) {
+        if (start + dashPx < 0) continue;
+        const s0 = Math.max(0, start);
+        const s1 = Math.min(total, start + dashPx);
+        const a = this.atScreen(cum, xs, ys, s0);
+        const bPt = this.atScreen(cum, xs, ys, s1);
+        if (!a || !bPt) continue;
+        const mx = (a[0] + bPt[0]) / 2;
+        const my = (a[1] + bPt[1]) / 2;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2.4;
+        // 头亮尾淡：形成拖尾感
+        ctx.globalAlpha = 0.34;
+        ctx.beginPath();
+        ctx.moveTo(mx, my);
+        ctx.lineTo(bPt[0], bPt[1]);
+        ctx.stroke();
+        ctx.globalAlpha = 0.92;
+        ctx.beginPath();
+        ctx.moveTo(a[0], a[1]);
+        ctx.lineTo(mx, my);
+        ctx.stroke();
+      }
+    }
+    ctx.globalAlpha = 1;
+  }
+
   drawArrows(ctx: CanvasRenderingContext2D, w: number, h: number) {
     if ((this.opts.showArrows ?? true) === false) return;
     const season = this.opts.season ?? 'summer';
     const time = this.time;
     for (let gi = 0; gi < this.arrowGrid.length; gi++) {
       const { sp, ss, c } = this.arrowGrid[gi];
-      const col = typeColor(seasonalType(c, season));
-      const stem = clamp(this.view.scale * 0.55, 8, 20);
+      const col = tCol(c.type === 'warm');
+      const stem = clamp(this.view.scale * 0.6, 9, 21);
       for (let k = 0; k < ss.length; k++) {
         const s0 = ss[k];
         const [lng, lat] = pointAt(sp, s0);
@@ -669,27 +705,31 @@ class MapEngine {
         const uy = dy / len;
         const px = -uy;
         const py = ux;
-        const half = stem * 0.62;
-        const pulse = 0.68 + 0.24 * Math.sin(time * 1.8 + gi * 0.83 + k * 0.29);
+        const half = stem * 0.66;
+        const pulse = 0.8 + 0.2 * Math.sin(time * 1.8 + gi * 0.83 + k * 0.29);
         ctx.globalAlpha = pulse;
-        // 箭杆
-        ctx.strokeStyle = col;
-        ctx.lineWidth = 1.6;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(x1 - ux * stem * 1.15, y1 - uy * stem * 1.15);
-        ctx.lineTo(x1 + ux * stem * 0.25, y1 + uy * stem * 0.25);
-        ctx.stroke();
-        // 实心箭头头（Ventusky 式）
-        const tx = x1 + ux * stem * 1.55;
-        const ty = y1 + uy * stem * 1.55;
-        ctx.fillStyle = col;
+        // 实心箭头头（白描边，亮底高对比）
+        const tx = x1 + ux * stem * 1.6;
+        const ty = y1 + uy * stem * 1.6;
+        ctx.lineJoin = 'round';
         ctx.beginPath();
         ctx.moveTo(tx, ty);
         ctx.lineTo(x1 + ux * stem * 0.5 + px * half, y1 + uy * stem * 0.5 + py * half);
         ctx.lineTo(x1 + ux * stem * 0.5 - px * half, y1 + uy * stem * 0.5 - py * half);
         ctx.closePath();
+        ctx.strokeStyle = 'rgba(255,255,255,0.9)';
+        ctx.lineWidth = 1.4;
+        ctx.stroke();
+        ctx.fillStyle = col;
         ctx.fill();
+        // 箭杆
+        ctx.strokeStyle = col;
+        ctx.lineWidth = 2.2;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(x1 - ux * stem * 1.2, y1 - uy * stem * 1.2);
+        ctx.lineTo(x1 + ux * stem * 0.3, y1 + uy * stem * 0.3);
+        ctx.stroke();
       }
     }
     ctx.globalAlpha = 1;
@@ -703,9 +743,9 @@ class MapEngine {
       const c = CURRENT_MAP[id];
       if (!c) continue;
       const sp = samplePathCache(c, season);
-      const col = typeColor(seasonalType(c, season));
+      const col = tCol(c.type === 'warm');
       ctx.strokeStyle = col;
-      ctx.globalAlpha = dim && c.id !== this.opts.selectedId ? 0.02 : 0.055;
+      ctx.globalAlpha = dim && c.id !== this.opts.selectedId ? 0.02 : 0.1;
       ctx.lineWidth = (5 + (c.width ?? 1) * 2.5);
       ctx.lineCap = 'round';
       ctx.beginPath();
