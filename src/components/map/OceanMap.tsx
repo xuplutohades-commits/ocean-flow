@@ -732,100 +732,119 @@ class MapEngine {
 
   /** 流场缓存键：视窗变化超过阈值才重建（拖动/缩放/聚焦动画期间自动重建） */
   fieldCacheKey(): string {
-    const s = this.view.scale;
+    // 流场绑定全球经纬度网格：仅画布尺寸/季节/洋流集合变化才重建；
+    // 拖动、缩放都只重新投影，任何位置都能即时显示流向与粒子
     return (
       this.w + 'x' + this.h + '|' +
-      Math.round(s * 50) + '|' +
-      Math.round((this.view.lng0 * s) / 3) + '|' +
-      Math.round((this.view.lat0 * s) / 3)
+      (this.opts.season ?? 'summer') + '|' +
+      (this.opts.currentIds?.join(',') ?? 'all')
     );
   }
 
-  /** 由洋流路径构建二维矢量场（屏幕空间）：路径细分为线段，落入空间网格 */
+  /** 由洋流路径构建全球经纬度矢量场（世界空间，跨经度无缝） */
   rebuildField() {
-    const { w, h } = this;
     const season = this.opts.season ?? 'summer';
     const ids = this.opts.currentIds?.length ? this.opts.currentIds : CURRENTS.map((c) => c.id);
     const segs: FlowSegment[] = [];
     const pool: { sp: SampledPath; warm: boolean; span: number; strength: number; id: string; cum: number }[] = [];
     let acc = 0;
+    const CELL = 1.6; // 世界网格分辨率（度）
+    const nCol = Math.ceil(360 / CELL);
+    const nRow = Math.ceil(180 / CELL);
     for (const id of ids) {
       const c = CURRENT_MAP[id];
       if (!c) continue;
       const sp = samplePathCache(c, season);
       const span = c.width ?? 1;
       const warm = c.type === 'warm';
-      // 强弱洋流：速度、轨迹长度、出生密度都随 strength 缩放
       const strength = 0.55 + span * 0.55;
       for (let i = 0; i < sp.pts.length - 1; i++) {
-        const [x1, y1] = this.proj(sp.pts[i][0], sp.pts[i][1]);
-        const [x2, y2] = this.proj(sp.pts[i + 1][0], sp.pts[i + 1][1]);
-        if ((x1 < -90 && x2 < -90) || (x1 > w + 90 && x2 > w + 90)) continue;
-        if ((y1 < -90 && y2 < -90) || (y1 > h + 90 && y2 > h + 90)) continue;
+        let x1 = sp.pts[i][0], y1 = sp.pts[i][1];
+        let x2 = sp.pts[i + 1][0], y2 = sp.pts[i + 1][1];
+        // 经线连续化：跨 ±180° 的线段按最近方向调整
+        if (x2 - x1 > 180) x2 -= 360;
+        else if (x2 - x1 < -180) x2 += 360;
         const dx = x2 - x1;
         const dy = y2 - y1;
         const len = Math.hypot(dx, dy) || 1;
-        // 经度环绕：边缘线段在另一侧复制一份，粒子跨边时不穿出地图
-        const pushSeg = (ox: number) =>
-          segs.push({ x1: x1 + ox, y1, x2: x2 + ox, y2, tx: dx / len, ty: dy / len, span, strength, id, warm });
-        pushSeg(0);
-        const m = 130;
-        if (x1 < m || x2 < m) pushSeg(w);
-        if (x1 > w - m || x2 > w - m) pushSeg(-w);
+        segs.push({ x1, y1, x2, y2, tx: dx / len, ty: dy / len, span, strength, id, warm });
       }
       acc += sp.total * (0.7 + span * 0.5);
       pool.push({ sp, warm, span, strength, id, cum: acc });
     }
-    this.fieldCell = 56;
+    this.fieldCell = CELL;
     this.fieldSegs = segs;
     this.spawnPool = pool;
     this.fieldGrid.clear();
-    const cell = this.fieldCell;
-    for (let i = 0; i < segs.length; i++) {
-      const s = segs[i];
-      const cx0 = Math.floor(Math.min(s.x1, s.x2) / cell);
-      const cx1 = Math.floor(Math.max(s.x1, s.x2) / cell);
-      const cy0 = Math.floor(Math.min(s.y1, s.y2) / cell);
-      const cy1 = Math.floor(Math.max(s.y1, s.y2) / cell);
-      for (let cx = cx0; cx <= cx1; cx++) {
-        for (let cy = cy0; cy <= cy1; cy++) {
-          const key = (cy + 4096) * 16384 + (cx + 4096);
+    // 线段落入经纬网格桶（经度桶循环：绕回 0°/360° 无缝）
+    const addCells = (i: number, kx0: number, kx1: number, ky0: number, ky1: number) => {
+      const range: number[] = [];
+      if (kx0 <= kx1) for (let kx = kx0; kx <= kx1; kx++) range.push(kx);
+      else { for (let kx = kx0; kx < nCol; kx++) range.push(kx); for (let kx = 0; kx <= kx1; kx++) range.push(kx); }
+      for (const kx of range) {
+        for (let ky = ky0; ky <= ky1; ky++) {
+          const key = ky * 16384 + kx;
           const bucket = this.fieldGrid.get(key);
           if (bucket) bucket.push(i);
           else this.fieldGrid.set(key, [i]);
         }
       }
+    };
+    for (let i = 0; i < segs.length; i++) {
+      const sg = segs[i];
+      const mnX = Math.min(sg.x1, sg.x2), mxX = Math.max(sg.x1, sg.x2);
+      let kx0 = Math.floor((((mnX % 360) + 360) % 360) / CELL);
+      let kx1 = Math.floor((((mxX % 360) + 360) % 360) / CELL);
+      const ky0 = Math.max(0, Math.floor((Math.min(sg.y1, sg.y2) + 90) / CELL));
+      const ky1 = Math.min(nRow - 1, Math.floor((Math.max(sg.y1, sg.y2) + 90) / CELL));
+      addCells(i, kx0, kx1, ky0, ky1);
+      // 横跨 0°/360° 边界的线段：另一侧补充一份桶
+      if (mxX - mnX > 360 - CELL * 2) {
+        kx0 = Math.floor((((mnX + 360) % 360)) / CELL);
+        kx1 = Math.floor((((mxX + 360) % 360)) / CELL);
+        addCells(i, kx0, kx1, ky0, ky1);
+      }
     }
     this.fieldKey = this.fieldCacheKey();
   }
 
-  /** 采样某屏幕点的流场：归一化流向 + 冷暖占优色（高斯衰减，自然过渡到邻近洋流） */
+  /** 采样某点的流场（经纬度空间）：归一化流向 + 冷暖占优色（高斯衰减，可跨经度无缝） */
   pointField(x: number, y: number): { vx: number; vy: number; warm: boolean; ok: boolean; strength: number; cId: string; weight: number } {
     const cell = this.fieldCell;
     const g = this.fieldGrid;
     const segs = this.fieldSegs;
     if (!segs.length) return { vx: 0, vy: 0, warm: false, ok: false, strength: 1, cId: '', weight: 0 };
-    const R = 46;
+    const [lng, lat] = this.screenToLngLat(x, y);
+    const R = Math.max(0.9, 46 / (this.view.scale || 1)); // 采样半径（度），随缩放换算
+    const nCol = Math.ceil(360 / cell);
+    const nRow = Math.ceil(180 / cell);
+    const spanK = Math.min(12, Math.ceil(R / cell) + 1);
+    const kLng = (((Math.floor(lng / cell)) % nCol) + nCol) % nCol;
+    const kLat = Math.max(0, Math.min(nRow - 1, Math.floor((lat + 90) / cell)));
     let vx = 0, vy = 0, wt = 0, warmW = 0, coldW = 0;
     let bestId = '', bestW = 0, bestSt = 1;
-    const cx0 = Math.floor(x / cell) - 1;
-    const cy0 = Math.floor(y / cell) - 1;
-    for (let cx = cx0; cx <= cx0 + 2; cx++) {
-      for (let cy = cy0; cy <= cy0 + 2; cy++) {
-        const bucket = g.get((cy + 4096) * 16384 + (cx + 4096));
+    for (let dk = -spanK; dk <= spanK; dk++) {
+      const kx = ((kLng + dk) % nCol + nCol) % nCol;
+      for (let dky = -spanK; dky <= spanK; dky++) {
+        const ky = Math.max(0, Math.min(nRow - 1, kLat + dky));
+        const bucket = g.get(ky * 16384 + kx);
         if (!bucket) continue;
         for (let k = 0; k < bucket.length; k++) {
           const s = segs[bucket[k]];
-          const abx = s.x2 - s.x1;
-          const aby = s.y2 - s.y1;
-          const len2 = abx * abx + aby * aby;
+          // 取相对经度（按最近的一圈）
+          let d1 = lng - s.x1;
+          if (d1 > 180) d1 -= 360; else if (d1 < -180) d1 += 360;
+          let dA = s.x2 - s.x1;
+          if (dA > 180) dA -= 360; else if (dA < -180) dA += 360;
+          const ay = s.y2 - s.y1;
+          const len2 = dA * dA + ay * ay;
           let t = 0;
-          if (len2 > 1e-9) t = Math.max(0, Math.min(1, ((x - s.x1) * abx + (y - s.y1) * aby) / len2));
-          const px = s.x1 + abx * t;
-          const py = s.y1 + aby * t;
-          const d = Math.hypot(x - px, y - py);
-          if (d > R) continue;
-          const w = Math.exp(-(d * d) / 450) * (0.65 + 0.35 * s.span);
+          if (len2 > 1e-9) t = Math.max(0, Math.min(1, (d1 * dA + (lat - s.y1) * ay) / len2));
+          const px = d1 * (1 - t) + t * dA;
+          const py = s.y1 + ay * t - lat;
+          const d = Math.hypot(px, py);
+          if (d > R * 1.9) continue;
+          const w = Math.exp(-(d * d) / (R * R * 0.42)) * (0.65 + 0.35 * s.span);
           if (w > bestW) { bestW = w; bestId = s.id; bestSt = s.strength; }
           vx += s.tx * w;
           vy += s.ty * w;
@@ -935,15 +954,19 @@ class MapEngine {
       const f = this.pointField(dot.x, dot.y);
       if (f.ok) {
         const wob = pseudoNoise(dot.x * 0.011 + this.time * 0.33, dot.seed);
-        const perpX = -f.vy;
-        const perpY = f.vx;
+        // 世界(经,纬)方向 → 屏幕方向（y 轴翻转并归一化）
+        const dirX = f.vx, dirY = -f.vy;
+        const dirLen = Math.hypot(dirX, dirY) || 1;
+        const fnx = dirX / dirLen, fny = dirY / dirLen;
+        const perpX = -fny;
+        const perpY = fnx;
         const st = f.strength;
         dot.warm = f.warm;
         dot.cId = f.cId;
         const spd = base * st * (0.72 + (dot.seed % 97) / 210);
         const effLen = dot.len * (0.6 + st * 0.4) * (0.55 + 0.45 * lod);
-        const vx = f.vx * spd + perpX * wob * 7;
-        const vy = f.vy * spd + perpY * wob * 7;
+        const vx = fnx * spd + perpX * wob * 7;
+        const vy = fny * spd + perpY * wob * 7;
         const nx = dot.x + vx * dt;
         const ny = dot.y + vy * dt;
         // 经度环绕：跨地图边缘时换到另一侧，不穿出地图
