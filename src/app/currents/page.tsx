@@ -69,6 +69,11 @@ function CurrentDetail({ c, season, onFocus, onClear }: {
   );
 }
 
+/** 太平洋“8”字环流：北环流（顺）+ 南环流（逆）各四条代表洋流 */
+const PACIFIC_8 = [
+  'kuroshio', 'northPacCurrent', 'californiaCurrent', 'pacNorthEq',
+  'eastAustralia', 'pacSouthEq', 'peruCurrent', 'westWindS',
+];
 const TEACH_STEPS: {
   t: string; d: string; focus: string;
   view?: { center: [number, number]; zoom?: number };
@@ -146,7 +151,7 @@ export default function CurrentsPage() {
             selectedId={selectedId}
             onSelect={handleSelect}
             dimUnselected={mode === 'teach'}
-            annotation={mode === 'teach' && step === 0 ? 'pacific8' : null}
+            highlightIds={mode === 'teach' && step === 0 ? PACIFIC_8 : undefined}
           />
           {/* 顶部标题 */}
           <div className="absolute top-[72px] left-5 right-5 flex items-start justify-between gap-3 pointer-events-none z-10">

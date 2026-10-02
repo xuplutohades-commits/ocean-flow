@@ -67,8 +67,8 @@ export interface OceanMapProps {
   style?: React.CSSProperties;
   dimUnselected?: boolean;
   labelsOnlySelected?: boolean;
-  /** 附加教学批注图层：'pacific8' 绘制太平洋“8”字环流示意 */
-  annotation?: 'pacific8' | null;
+  /** 教学高亮：加深显示这些洋流的路径与名称（构成“8”字环流的例子） */
+  highlightIds?: string[];
   /** 流动粒子层（默认开启；兼容旧版本 prop 名，不再绘制方向箭头） */
   showArrows?: boolean;
   pollute?: PollutionSource[];
@@ -708,9 +708,41 @@ class MapEngine {
       }
     }
 
-    // 教学批注：太平洋“8”字环流示意
-    if (this.opts.annotation === 'pacific8' && this.view.scale <= 12) {
-      this.drawPacificGyres(ctx, w, h);
+    // 教学第一步：把构成“8”字环流的洋流本身加深描边（外发光 + 主色）
+    const hids = this.opts.highlightIds;
+    if (hids?.length) {
+      for (const id of hids) {
+        const c = CURRENT_MAP[id];
+        if (!c) continue;
+        const sp = samplePathCache(c, season);
+        const col = typeColor(seasonalType(c, season));
+        ctx.strokeStyle = col;
+        ctx.lineCap = 'round';
+        ctx.lineJoin = 'round';
+        ctx.beginPath();
+        let px0 = NaN;
+        const half = w / 2;
+        for (const p of sp.pts) {
+          const [x0, y0] = this.proj(p[0], p[1]);
+          // 经度环绕：把路径折叠回当前视窗最接近的副本，跨缝自动断开
+          const x = x0 - w * Math.round((x0 - half) / w);
+          if (isNaN(px0) || Math.abs(x - px0) > half) {
+            ctx.moveTo(x, y0);
+          } else {
+            ctx.lineTo(x, y0);
+          }
+          px0 = x;
+        }
+        // 外圈柔光 + 主路径加深
+        ctx.globalAlpha = 0.22;
+        ctx.lineWidth = 9;
+        ctx.stroke();
+        ctx.globalAlpha = 0.78;
+        ctx.lineWidth = 3.2;
+        ctx.stroke();
+        ctx.globalAlpha = 1;
+        ctx.lineWidth = 1;
+      }
     }
 
     // 监测点位置上报（节流）
@@ -1137,7 +1169,7 @@ class MapEngine {
     type Lbl = {
       id: string; x: number; y: number; tw: number; bh: number;
       fs: number; col: string; alpha: number; name: string; en?: string;
-      major: boolean; active: boolean;
+      major: boolean; active: boolean; highlighted: boolean;
     };
     const items: Lbl[] = [];
     // 第一遍：收集可见标签（全局视图也显示全部名称；缩得很小才隐藏次要洋流）
@@ -1158,18 +1190,19 @@ class MapEngine {
       const fs = 11.5 * scaleK;
       const col = typeColor(seasonalType(c, season));
       const dimmed = this.opts.dimUnselected && this.opts.selectedId && c.id !== this.opts.selectedId;
-      const alpha = active ? 1 : (dimmed ? 0.3 : (major ? 0.82 : 0.72));
+      const highlighted = !!this.opts.highlightIds?.includes(id);
+      const alpha = active || highlighted ? 1 : (dimmed ? 0.3 : (major ? 0.82 : 0.72));
       ctx.font = '600 ' + fs + 'px "PingFang SC", sans-serif';
       const name = c.nameZh + (c.seasonal ? (season === 'summer' ? '（夏）' : '（冬）') : '');
       const tw = ctx.measureText(name).width;
       const bh = fs + 8;
       const en = showEn && !active && (major || subset || lod >= 1.9) ? c.nameEn.slice(0, 26) : undefined;
-      items.push({ id, x, y, tw, bh, fs, col, alpha, name, en, major, active });
+      items.push({ id, x, y, tw, bh, fs, col, alpha, name, en, major, active, highlighted });
     }
     // 第二遍：碰撞避免。选中 > 主要 > 其余；撞到已放置标签就上下错开，
     // 让相近的暖流/寒流标签能同时显示，而不是挤在一起盖住彼此
     items.sort((a, b) =>
-      ((a.active ? 0 : a.major ? 1 : 2) - (b.active ? 0 : b.major ? 1 : 2)) || a.y - b.y);
+      ((a.active ? 0 : a.highlighted ? 1 : a.major ? 2 : 3) - (b.active ? 0 : b.highlighted ? 1 : b.major ? 2 : 3)) || a.y - b.y);
     const padX = 7;
     const placed: { x0: number; y0: number; x1: number; y1: number }[] = [];
     const overlaps = (it: Lbl, dy: number, enH: number) => {
@@ -1183,7 +1216,7 @@ class MapEngine {
     for (const it of items) {
       const enH = it.en ? it.fs * 0.62 + 5 : 0;
       let dy = 0;
-      let ok = it.active;
+      let ok = it.active || it.highlighted;
       if (!ok) {
         // 先试原位，再依次往上/下错开，最多 ±4 档
         for (const step of [0, 1, -1, 2, -2, 3, -3, 4, -4]) {
@@ -1216,90 +1249,6 @@ class MapEngine {
         x0: x - tw / 2 - padX, x1: x + tw / 2 + padX,
         y0: y + dy - bh / 2, y1: y + dy + bh / 2 + enH,
       });
-    }
-  }
-
-  /** 教学第一步批注：太平洋“8”字环流示意（北顺南逆，暖流橙 / 寒流冰蓝弧线 + 箭头） */
-  private drawPacificGyres(ctx: CanvasRenderingContext2D, w: number, h: number) {
-    const { lng0, lat0, scale } = this.view;
-    const px = (lng: number) => (lng - lng0) * scale;
-    const py = (lat: number) => (lat0 - lat) * scale;
-    const P = (lng: number, lat: number) => [px(lng), py(lat)] as const;
-    const north = { cx: px(184), cy: py(30), rx: 52 * scale, ry: 25 * scale };
-    const south = { cx: px(172), cy: py(-28), rx: 58 * scale, ry: 25 * scale };
-
-    const arcPts = (c: typeof north, a0: number, a1: number, sign: 1 | -1) => {
-      const steps = 26;
-      const pts: [number, number][] = [];
-      for (let i = 0; i <= steps; i++) {
-        const a = a0 + ((a1 - a0) * i) / steps;
-        pts.push([c.cx + c.rx * Math.cos(a), c.cy + c.ry * Math.sin(a)]);
-      }
-      return sign === 1 ? pts : pts.reverse();
-    };
-    const drawArc = (c: typeof north, a0: number, a1: number, sign: 1 | -1, color: string, alpha: number, lw: number) => {
-      const pts = arcPts(c, a0, a1, sign);
-      ctx.strokeStyle = color;
-      ctx.globalAlpha = alpha;
-      ctx.lineWidth = lw;
-      ctx.lineCap = 'round';
-      ctx.beginPath();
-      pts.forEach((p0, i) => (i === 0 ? ctx.moveTo(p0[0], p0[1]) : ctx.lineTo(p0[0], p0[1])));
-      ctx.stroke();
-      const tip = pts[pts.length - 1];
-      const prev = pts[pts.length - 2];
-      const dx = tip[0] - prev[0], dy = tip[1] - prev[1];
-      const len = Math.hypot(dx, dy) || 1;
-      const ux = dx / len, uy = dy / len;
-      const size = 8;
-      ctx.globalAlpha = alpha + 0.12;
-      ctx.fillStyle = color;
-      ctx.beginPath();
-      ctx.moveTo(tip[0] + ux * size, tip[1] + uy * size);
-      ctx.lineTo(tip[0] - uy * size * 0.55, tip[1] + ux * size * 0.55);
-      ctx.lineTo(tip[0] + uy * size * 0.55, tip[1] - ux * size * 0.55);
-      ctx.closePath();
-      ctx.fill();
-      ctx.globalAlpha = 1;
-    };
-
-    // 底层虚线椭圆：示意完整环流边界
-    for (const c of [north, south]) {
-      ctx.strokeStyle = 'rgba(120, 210, 235, 0.18)';
-      ctx.lineWidth = 1.2;
-      ctx.setLineDash([3, 5]);
-      ctx.beginPath();
-      ctx.ellipse(c.cx, c.cy, c.rx, c.ry, 0, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.setLineDash([]);
-    }
-
-    // 北太平洋环流（顺时针）：西=暖流北上，顶=东去，东=寒流南下，底=西归
-    drawArc(north, Math.PI, Math.PI * 1.5, 1, '#f6a15a', 0.85, 2.2);
-    drawArc(north, Math.PI * 1.5, Math.PI * 2, 1, '#f0b878', 0.68, 2);
-    drawArc(north, 0, Math.PI * 0.5, 1, '#78d8f5', 0.85, 2.2);
-    drawArc(north, Math.PI * 0.5, Math.PI, 1, '#d8b385', 0.55, 1.8);
-    // 南太平洋环流（逆时针）：西=暖流南下，底=东去，东=寒流北上，顶=西归
-    drawArc(south, Math.PI * 1.5, Math.PI * 0.5, -1, '#f6a15a', 0.85, 2.2);
-    drawArc(south, Math.PI, Math.PI * 0.5, -1, '#8ec9e0', 0.55, 1.8);
-    drawArc(south, Math.PI * 0.5, -Math.PI * 0.5, -1, '#78d8f5', 0.85, 2.2);
-    drawArc(south, -Math.PI * 0.5, -Math.PI, -1, '#d8b385', 0.55, 1.8);
-
-    // 中心说明
-    for (const [c, label, warm] of [
-      [north, '北太平洋环流 · 顺时针', true] as const,
-      [south, '南太平洋环流 · 逆时针', false] as const,
-    ]) {
-      ctx.font = '600 13px "PingFang SC", sans-serif';
-      const tw = ctx.measureText(label).width;
-      ctx.globalAlpha = 0.92;
-      ctx.fillStyle = 'rgba(5, 24, 41, 0.74)';
-      ctx.beginPath();
-      ctx.roundRect(c.cx - tw / 2 - 9, c.cy - 13, tw + 18, 25, 8);
-      ctx.fill();
-      ctx.fillStyle = warm ? '#f6a15a' : '#78d8f5';
-      ctx.fillText(label, c.cx - tw / 2, c.cy + 4);
-      ctx.globalAlpha = 1;
     }
   }
 
