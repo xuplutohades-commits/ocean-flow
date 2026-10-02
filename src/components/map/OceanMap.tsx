@@ -412,6 +412,8 @@ class MapEngine {
   reset() { this.target = null; }
 
   zoomBy(f: number, px?: number, py?: number) {
+    // 用户一开始手动缩放，立即取消“聚焦飞行”动画，棁视回弹
+    this.target = null;
     const cx = px ?? this.w / 2;
     const cy = py ?? this.h / 2;
     const lng = (cx / this.view.scale) + this.view.lng0;
@@ -451,7 +453,11 @@ class MapEngine {
   }
 
   // 拖动视角
-  pointerDown(x: number, y: number) { this.dragging = true; this.lastPt = { x, y }; }
+  pointerDown(x: number, y: number) {
+    this.dragging = true;
+    this.lastPt = { x, y };
+    this.target = null; // 拖动时同样取消聚焦动画
+  }
   pointerMove(x: number, y: number) {
     if (this.dragging) {
       const dx = x - this.lastPt.x;
