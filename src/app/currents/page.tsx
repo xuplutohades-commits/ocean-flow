@@ -69,11 +69,15 @@ function CurrentDetail({ c, season, onFocus, onClear }: {
   );
 }
 
-const TEACH_STEPS = [
+const TEACH_STEPS: {
+  t: string; d: string; focus: string;
+  view?: { center: [number, number]; zoom?: number };
+}[] = [
   {
     t: '第一步 · 找规律',
     d: '观察全球界面：太平洋、大西洋各自有“8”字形环流——中低纬一个、中高纬一个；印度洋南半球同形，北半球被季风改写。',
     focus: 'none',
+    view: { center: [184, 4], zoom: 5.4 }, // 太平洋居中，展示“8”字环流
   },
   {
     t: '第二步 · 中低纬环流（北顺南逆）',
@@ -141,6 +145,8 @@ export default function CurrentsPage() {
             speed={speed}
             selectedId={selectedId}
             onSelect={handleSelect}
+            dimUnselected={mode === 'teach'}
+            annotation={mode === 'teach' && step === 0 ? 'pacific8' : null}
           />
           {/* 顶部标题 */}
           <div className="absolute top-[72px] left-5 right-5 flex items-start justify-between gap-3 pointer-events-none z-10">
@@ -205,7 +211,7 @@ export default function CurrentsPage() {
                 <div className="space-y-2 overflow-y-auto scroll-thin flex-1">
                   {TEACH_STEPS.map((s, i) => (
                     <button key={i}
-                      onClick={() => { setStep(i); if (s.focus !== 'none') handleFocus(s.focus); else mapRef.current?.reset(); }}
+                      onClick={() => { setStep(i); if (s.view) mapRef.current?.setView(s.view); else if (s.focus !== 'none') handleFocus(s.focus); else mapRef.current?.reset(); }}
                       className={`w-full text-left rounded-[10px] border p-3 transition-all ${step === i ? 'border-[rgba(111,227,224,0.5)] bg-[rgba(111,227,224,0.08)]' : 'border-[rgba(126,190,255,0.12)] bg-[rgba(8,22,40,0.5)] hover:bg-[rgba(15,38,66,0.6)]'}`}>
                       <div className={`text-[12.5px] font-semibold ${step === i ? 'text-[#d9fffd]' : 'text-[#a9c3de]'}`}>{s.t}</div>
                       <div className="text-[11px] leading-relaxed text-[#7996b5] mt-1">{s.d}</div>

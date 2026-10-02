@@ -67,6 +67,8 @@ export interface OceanMapProps {
   style?: React.CSSProperties;
   dimUnselected?: boolean;
   labelsOnlySelected?: boolean;
+  /** 附加教学批注图层：'pacific8' 绘制太平洋“8”字环流示意 */
+  annotation?: 'pacific8' | null;
   /** 流动粒子层（默认开启；兼容旧版本 prop 名，不再绘制方向箭头） */
   showArrows?: boolean;
   pollute?: PollutionSource[];
@@ -282,9 +284,10 @@ class MapEngine {
       b.strokeStyle = 'rgba(148, 200, 228, 0.085)';
       b.lineWidth = 1;
       b.beginPath();
-      for (let lg = -180; lg <= 180; lg += 30) {
+      const lngMin = this.view.lng0 - 30 / this.view.scale;
+      const lngMax = this.view.lng0 + (w + 30) / this.view.scale;
+      for (let lg = Math.floor(lngMin / 30) * 30; lg <= lngMax; lg += 30) {
         const x = (lg - this.view.lng0) * this.view.scale;
-        if (x < -1 || x > w + 1) continue;
         b.moveTo(x, 0); b.lineTo(x, h);
       }
       for (let lt = -60; lt <= 90; lt += 30) {
@@ -302,31 +305,34 @@ class MapEngine {
     // 陆地：暗色低对比；同时生成 ocean mask（1/4 分辨率）
     if (this.landReady) {
       b.fillStyle = '#27414A';
-      for (const poly of this.land) {
-        b.beginPath();
-        let started = false;
-        for (const pt of poly) {
-          const x = (pt.x * 360 - 180 - this.view.lng0) * this.view.scale;
-          const y = (this.view.lat0 - (90 - pt.y * 180)) * this.view.scale;
-          if (!started) { b.moveTo(x, y); started = true; }
-          else b.lineTo(x, y);
+      // 横向循环世界：每个多边形在 -360/0/+360 三个经度带各画一份，画布裁剪自动保留可见部分
+      for (const tile of [-360, 0, 360]) {
+        for (const poly of this.land) {
+          b.beginPath();
+          let started = false;
+          for (const pt of poly) {
+            const x = (pt.x * 360 - 180 - this.view.lng0 + tile) * this.view.scale;
+            const y = (this.view.lat0 - (90 - pt.y * 180)) * this.view.scale;
+            if (!started) { b.moveTo(x, y); started = true; }
+            else b.lineTo(x, y);
+          }
+          b.closePath();
+          b.fill();
         }
-        b.closePath();
-        b.fill();
-      }
-      // 海岸线
-      b.strokeStyle = 'rgba(70, 97, 106, 0.55)';
-      b.lineWidth = 1;
-      for (const poly of this.land) {
-        b.beginPath();
-        let started = false;
-        for (const pt of poly) {
-          const x = (pt.x * 360 - 180 - this.view.lng0) * this.view.scale;
-          const y = (this.view.lat0 - (90 - pt.y * 180)) * this.view.scale;
-          if (x < -200 || x > w + 200) { started = false; continue; }
-          if (!started) { b.moveTo(x, y); started = true; } else b.lineTo(x, y);
+        // 海岸线
+        b.strokeStyle = 'rgba(70, 97, 106, 0.55)';
+        b.lineWidth = 1;
+        for (const poly of this.land) {
+          b.beginPath();
+          let started = false;
+          for (const pt of poly) {
+            const x = (pt.x * 360 - 180 - this.view.lng0 + tile) * this.view.scale;
+            const y = (this.view.lat0 - (90 - pt.y * 180)) * this.view.scale;
+            if (x < -200 || x > w + 200) { started = false; continue; }
+            if (!started) { b.moveTo(x, y); started = true; } else b.lineTo(x, y);
+          }
+          b.stroke();
         }
-        b.stroke();
       }
       // ── ocean mask：洋流只允许出现在海上 ──
       const mc = this.maskCanvas;
@@ -338,18 +344,20 @@ class MapEngine {
       mb.setTransform(1, 0, 0, 1, 0, 0);
       mb.clearRect(0, 0, mw, mh);
       mb.fillStyle = '#000';
-      const k = this.view.scale / this.maskCell;
-      for (const poly of this.land) {
-        mb.beginPath();
-        let started = false;
-        for (const pt of poly) {
-          const x = (pt.x * 360 - 180 - this.view.lng0) * k;
-          const y = (this.view.lat0 - (90 - pt.y * 180)) * k;
-          if (!started) { mb.moveTo(x, y); started = true; }
-          else mb.lineTo(x, y);
+      const mk = this.view.scale / this.maskCell;
+      for (const tile of [-360, 0, 360]) {
+        for (const poly of this.land) {
+          mb.beginPath();
+          let started = false;
+          for (const pt of poly) {
+            const x = (pt.x * 360 - 180 - this.view.lng0 + tile) * mk;
+            const y = (this.view.lat0 - (90 - pt.y * 180)) * mk;
+            if (!started) { mb.moveTo(x, y); started = true; }
+            else mb.lineTo(x, y);
+          }
+          mb.closePath();
+          mb.fill();
         }
-        mb.closePath();
-        mb.fill();
       }
       const img = mb.getImageData(0, 0, mw, mh);
       this.maskData = img.data;
@@ -680,6 +688,29 @@ class MapEngine {
         ctx.stroke();
         ctx.globalAlpha = 1;
       }
+    } else if (this.opts.selectedId && this.opts.selectedId !== this.hovered) {
+      // 选中洋流的路径常亮（教学步骤/点选后都能一眼定位）
+      const c = CURRENT_MAP[this.opts.selectedId];
+      if (c) {
+        const sp = samplePathCache(c, season);
+        ctx.strokeStyle = typeColor(seasonalType(c, season));
+        ctx.globalAlpha = 0.5;
+        ctx.lineWidth = 3;
+        ctx.setLineDash([7, 6]);
+        ctx.beginPath();
+        sp.pts.forEach((p, i) => {
+          const [x, y] = this.proj(p[0], p[1]);
+          i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+        });
+        ctx.stroke();
+        ctx.setLineDash([]);
+        ctx.globalAlpha = 1;
+      }
+    }
+
+    // 教学批注：太平洋“8”字环流示意
+    if (this.opts.annotation === 'pacific8' && this.view.scale <= 12) {
+      this.drawPacificGyres(ctx, w, h);
     }
 
     // 监测点位置上报（节流）
@@ -1096,8 +1127,10 @@ class MapEngine {
       if (this.opts.labelsOnlySelected && !active) continue;
       const p = pathOf(c, season);
       const anchor = p[Math.floor(p.length * 0.5)];
-      const [x, y] = this.proj(anchor[0], anchor[1]);
-      if (x < -80 || x > w + 80 || y < -40 || y > h + 40) continue;
+      let [x, y] = this.proj(anchor[0], anchor[1]);
+      if (y < -40 || y > h + 40) continue;
+      // 经度环绕：跨过地图边缘的名称折回另一侧显示（世界横向循环）
+      if (w > 0) x = ((x % w) + w) % w;
       const scaleK = clamp(this.view.scale / 4, 0.75, 1.5);
       const fs = 11.5 * scaleK;
       const col = typeColor(seasonalType(c, season));
@@ -1160,6 +1193,90 @@ class MapEngine {
         x0: x - tw / 2 - padX, x1: x + tw / 2 + padX,
         y0: y + dy - bh / 2, y1: y + dy + bh / 2 + enH,
       });
+    }
+  }
+
+  /** 教学第一步批注：太平洋“8”字环流示意（北顺南逆，暖流橙 / 寒流冰蓝弧线 + 箭头） */
+  private drawPacificGyres(ctx: CanvasRenderingContext2D, w: number, h: number) {
+    const { lng0, lat0, scale } = this.view;
+    const px = (lng: number) => (lng - lng0) * scale;
+    const py = (lat: number) => (lat0 - lat) * scale;
+    const P = (lng: number, lat: number) => [px(lng), py(lat)] as const;
+    const north = { cx: px(184), cy: py(30), rx: 52 * scale, ry: 25 * scale };
+    const south = { cx: px(172), cy: py(-28), rx: 58 * scale, ry: 25 * scale };
+
+    const arcPts = (c: typeof north, a0: number, a1: number, sign: 1 | -1) => {
+      const steps = 26;
+      const pts: [number, number][] = [];
+      for (let i = 0; i <= steps; i++) {
+        const a = a0 + ((a1 - a0) * i) / steps;
+        pts.push([c.cx + c.rx * Math.cos(a), c.cy + c.ry * Math.sin(a)]);
+      }
+      return sign === 1 ? pts : pts.reverse();
+    };
+    const drawArc = (c: typeof north, a0: number, a1: number, sign: 1 | -1, color: string, alpha: number, lw: number) => {
+      const pts = arcPts(c, a0, a1, sign);
+      ctx.strokeStyle = color;
+      ctx.globalAlpha = alpha;
+      ctx.lineWidth = lw;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      pts.forEach((p0, i) => (i === 0 ? ctx.moveTo(p0[0], p0[1]) : ctx.lineTo(p0[0], p0[1])));
+      ctx.stroke();
+      const tip = pts[pts.length - 1];
+      const prev = pts[pts.length - 2];
+      const dx = tip[0] - prev[0], dy = tip[1] - prev[1];
+      const len = Math.hypot(dx, dy) || 1;
+      const ux = dx / len, uy = dy / len;
+      const size = 8;
+      ctx.globalAlpha = alpha + 0.12;
+      ctx.fillStyle = color;
+      ctx.beginPath();
+      ctx.moveTo(tip[0] + ux * size, tip[1] + uy * size);
+      ctx.lineTo(tip[0] - uy * size * 0.55, tip[1] + ux * size * 0.55);
+      ctx.lineTo(tip[0] + uy * size * 0.55, tip[1] - ux * size * 0.55);
+      ctx.closePath();
+      ctx.fill();
+      ctx.globalAlpha = 1;
+    };
+
+    // 底层虚线椭圆：示意完整环流边界
+    for (const c of [north, south]) {
+      ctx.strokeStyle = 'rgba(120, 210, 235, 0.18)';
+      ctx.lineWidth = 1.2;
+      ctx.setLineDash([3, 5]);
+      ctx.beginPath();
+      ctx.ellipse(c.cx, c.cy, c.rx, c.ry, 0, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.setLineDash([]);
+    }
+
+    // 北太平洋环流（顺时针）：西=暖流北上，顶=东去，东=寒流南下，底=西归
+    drawArc(north, Math.PI, Math.PI * 1.5, 1, '#f6a15a', 0.85, 2.2);
+    drawArc(north, Math.PI * 1.5, Math.PI * 2, 1, '#f0b878', 0.68, 2);
+    drawArc(north, 0, Math.PI * 0.5, 1, '#78d8f5', 0.85, 2.2);
+    drawArc(north, Math.PI * 0.5, Math.PI, 1, '#d8b385', 0.55, 1.8);
+    // 南太平洋环流（逆时针）：西=暖流南下，底=东去，东=寒流北上，顶=西归
+    drawArc(south, Math.PI * 1.5, Math.PI * 0.5, -1, '#f6a15a', 0.85, 2.2);
+    drawArc(south, Math.PI, Math.PI * 0.5, -1, '#8ec9e0', 0.55, 1.8);
+    drawArc(south, Math.PI * 0.5, -Math.PI * 0.5, -1, '#78d8f5', 0.85, 2.2);
+    drawArc(south, -Math.PI * 0.5, -Math.PI, -1, '#d8b385', 0.55, 1.8);
+
+    // 中心说明
+    for (const [c, label, warm] of [
+      [north, '北太平洋环流 · 顺时针', true] as const,
+      [south, '南太平洋环流 · 逆时针', false] as const,
+    ]) {
+      ctx.font = '600 13px "PingFang SC", sans-serif';
+      const tw = ctx.measureText(label).width;
+      ctx.globalAlpha = 0.92;
+      ctx.fillStyle = 'rgba(5, 24, 41, 0.74)';
+      ctx.beginPath();
+      ctx.roundRect(c.cx - tw / 2 - 9, c.cy - 13, tw + 18, 25, 8);
+      ctx.fill();
+      ctx.fillStyle = warm ? '#f6a15a' : '#78d8f5';
+      ctx.fillText(label, c.cx - tw / 2, c.cy + 4);
+      ctx.globalAlpha = 1;
     }
   }
 
