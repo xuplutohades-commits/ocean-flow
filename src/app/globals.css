@@ -95,13 +95,13 @@ button { font-family: inherit; cursor: pointer; }
   line-height: 1.05;
 }
 .grad-text {
-  background: linear-gradient(115deg, #ffffff 10%, #bde6ff 45%, #7fe3e0 75%, #ffd9ae 105%);
+  background: linear-gradient(120deg, #ffffff 12%, #dbe9f7 55%, #c8dcee 90%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
 }
 .grad-text-warm {
-  background: linear-gradient(115deg, #ffd9ae, #ff9d5c 70%);
+  background: linear-gradient(115deg, #f1e3d1, #e2c7a8 70%);
   -webkit-background-clip: text;
   background-clip: text;
   color: transparent;
@@ -127,15 +127,8 @@ button { font-family: inherit; cursor: pointer; }
   border-color: rgba(111, 227, 224, 0.45);
 }
 .btn-primary:hover { box-shadow: 0 8px 30px rgba(111, 227, 224, 0.25); }
-.btn-glow { position: relative; overflow: hidden; }
-.btn-glow::after {
-  content: "";
-  position: absolute; left: -40%; top: 0; width: 30%; height: 100%;
-  background: linear-gradient(100deg, transparent, rgba(255, 255, 255, 0.28), transparent);
-  transform: skewX(-20deg);
-  animation: sheen 3.6s ease-in-out infinite;
-}
-@keyframes sheen { 0% { left: -40%; } 55% { left: 130%; } 100% { left: 130%; } }
+.btn-glow { position: relative; }
+.btn-glow:hover { box-shadow: 0 10px 34px rgba(4, 18, 36, 0.4); }
 
 .badge {
   display: inline-flex; align-items: center; gap: 6px;

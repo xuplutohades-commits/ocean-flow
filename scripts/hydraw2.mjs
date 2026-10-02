@@ -1,0 +1,11 @@
+import { chromium } from 'playwright-core';
+const EXE = '/Users/qianxu/Library/Caches/ms-playwright/chromium_headless_shell-1223/chrome-headless-shell-mac-arm64/chrome-headless-shell';
+const browser = await chromium.launch({ executablePath: EXE, headless: true, args: ['--no-sandbox', '--use-gl=swiftshader'] });
+const page = await browser.newPage({ viewport: { width: 1440, height: 900 } });
+const all = [];
+page.on('console', (m) => all.push(`${m.type().toUpperCase()}: ${m.text().slice(0, 500)}`));
+page.on('pageerror', (e) => all.push(`PAGEERROR: ${String(e).slice(0, 500)}`));
+await page.goto('http://localhost:3000/', { waitUntil: 'networkidle' });
+await page.waitForTimeout(3000);
+all.forEach((l, i) => console.log(`${i}: ${l}`));
+await browser.close();

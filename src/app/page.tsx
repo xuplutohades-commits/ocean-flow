@@ -2,26 +2,10 @@
 import Link from 'next/link';
 import dynamic from 'next/dynamic';
 import { Reveal, DotLegend } from '@/components/ui/kit';
+import SpotlightCard from '@/components/ui/reactbits/SpotlightCard';
 
 const GlobeCanvas = dynamic(() => import('@/components/globe/GlobeCanvas'), { ssr: false });
-
-const ENTRIES = [
-  {
-    href: '/currents', en: 'EXPLORE', title: '探索全球洋流',
-    desc: '世界表层洋流分布 · 暖流与寒流 · 点击任意洋流查看知识卡片',
-    color: 'rgba(94,200,255,0.55)',
-  },
-  {
-    href: '/formation', en: 'FORMATION LAB', title: '看看洋流如何形成',
-    desc: '风带 → 盛行风 → 地转偏向力 → 海陆分布，亲手搭建大洋环流',
-    color: 'rgba(111,227,224,0.55)',
-  },
-  {
-    href: '/atmosphere', en: 'OCEAN × AIR', title: '进入海气实验室',
-    desc: '季风洋流 · 沃克环流 · 厄尔尼诺与拉尼娜，海洋与大气怎样互相牵动',
-    color: 'rgba(255,157,92,0.55)',
-  },
-];
+const HeroIntro = dynamic(() => import('@/components/home/HeroIntro'), { ssr: false });
 
 const MODULES = [
   { href: '/currents', n: '01', zh: '全球洋流', en: 'GLOBAL CURRENTS', desc: '教材范围的世界洋流分布图，粒子沿流线运动，鼠标悬停 / 点击查看每条洋流的名称、方向、性质与路径。' },
@@ -46,41 +30,9 @@ export default function Home() {
           }} />
         <div className="mx-auto max-w-[1500px] w-full px-6 lg:px-10 grid lg:grid-cols-[1.05fr_1fr] gap-8 items-center relative z-10">
           <div>
-            <Reveal>
-              <div className="flex items-center gap-3">
-                <span className="kicker">Interactive Geography Lab</span>
-                <span className="marquee-line" style={{ width: 90 }} />
-              </div>
-            </Reveal>
-            <Reveal delay={0.08}>
-              <h1 className="title-disp text-[46px] md:text-[64px] lg:text-[76px] mt-5 leading-[1.02]">
-                <span className="grad-text">OCEAN</span>
-                <br />
-                <span className="grad-text-warm">FLOW</span>
-              </h1>
-            </Reveal>
-            <Reveal delay={0.16}>
-              <p className="mt-5 text-[17px] md:text-[19px] text-[#cfe4ff] font-medium leading-snug max-w-xl">
-                洋流，正在重新分配这个星球的热量。
-              </p>
-              <p className="mt-3 text-[13.5px] text-[#8ba7c6] leading-relaxed max-w-xl">
-                风推动海水，地球自转让海水偏转，大陆把它围成一个个环流——<br className="hidden md:block" />
-                这是一间面向高中地理课堂的互动实验室：地图、动画、模拟与真实世界案例，带你亲手“看见”洋流。
-              </p>
-            </Reveal>
-            <Reveal delay={0.24}>
-              <div className="mt-8 grid sm:grid-cols-3 gap-3 max-w-2xl">
-                {ENTRIES.map((e, i) => (
-                  <Link key={e.href} href={e.href}
-                    className="btn btn-glow h-full flex-col items-start !p-4 text-left group" style={{ borderColor: 'rgba(126,190,255,0.18)' }}>
-                    <span className="text-[10px] tracking-[0.28em]" style={{ color: e.color }}>{e.en}</span>
-                    <span className="text-[15px] font-bold text-[#eaf6ff] mt-1.5">{e.title}</span>
-                    <span className="text-[11.5px] text-[#7996b5] leading-relaxed mt-1">{e.desc}</span>
-                    <span className="text-[13px] text-[#6fe3e0] mt-2 opacity-0 group-hover:opacity-100 transition-opacity">进入 →</span>
-                  </Link>
-                ))}
-              </div>
-            </Reveal>
+            <div className="min-h-[300px]">
+              <HeroIntro />
+            </div>
             <Reveal delay={0.32}>
               <div className="mt-6 flex items-center gap-6 text-[11.5px] text-[#5f7b99]">
                 <DotLegend />
@@ -123,14 +75,16 @@ export default function Home() {
         <div className="mt-10 grid md:grid-cols-2 xl:grid-cols-3 gap-4">
           {MODULES.map((m, i) => (
             <Reveal key={m.href} delay={i * 0.05}>
-              <Link href={m.href} className="glass p-6 block h-full transition-transform hover:-translate-y-1 group relative overflow-hidden">
-                <div aria-hidden className="absolute -right-10 -top-12 text-[110px] font-bold text-transparent select-none"
-                  style={{ WebkitTextStroke: '1px rgba(126,190,255,0.10)' }}>{m.n}</div>
-                <div className="kicker text-[10px]">{m.en}</div>
-                <div className="text-[19px] font-bold text-[#eaf6ff] mt-2 group-hover:text-[#d9fffd] transition-colors">{m.zh}</div>
-                <p className="text-[12.5px] leading-relaxed text-[#7996b5] mt-2.5">{m.desc}</p>
-                <span className="inline-block mt-4 text-[12px] text-[#6fe3e0] opacity-0 group-hover:opacity-100 transition-opacity">进入模块 →</span>
-              </Link>
+              <SpotlightCard className="glass h-full" spotlightColor="rgba(111, 227, 224, 0.09)">
+                <Link href={m.href} className="p-6 block h-full group transition-transform hover:-translate-y-0.5 relative">
+                  <div aria-hidden className="absolute -right-10 -top-12 text-[110px] font-bold text-transparent select-none"
+                    style={{ WebkitTextStroke: '1px rgba(126,190,255,0.10)' }}>{m.n}</div>
+                  <div className="kicker text-[10px]">{m.en}</div>
+                  <div className="text-[19px] font-bold text-[#eaf6ff] mt-2 group-hover:text-[#d9fffd] transition-colors">{m.zh}</div>
+                  <p className="text-[12.5px] leading-relaxed text-[#7996b5] mt-2.5">{m.desc}</p>
+                  <span className="inline-block mt-4 text-[12px] text-[#6fe3e0] opacity-0 group-hover:opacity-100 transition-opacity">进入模块 →</span>
+                </Link>
+              </SpotlightCard>
             </Reveal>
           ))}
         </div>

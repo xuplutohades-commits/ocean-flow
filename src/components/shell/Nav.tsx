@@ -33,9 +33,9 @@ export default function Nav() {
         <div className="mx-auto max-w-[1500px] px-4 lg:px-8 h-[60px] flex items-center gap-4">
           <Link href="/" className="flex items-center gap-2.5 group flex-none" onClick={() => setOpen(false)}>
             <span className="relative w-8 h-8 rounded-[10px] flex items-center justify-center overflow-hidden"
-              style={{ background: 'linear-gradient(140deg, #0b2c4e, #06203c)', border: '1px solid rgba(111,227,224,.35)' }}>
-              <span className="absolute inset-x-1 top-1/2 h-[2px] rounded bg-[#5ec8ff] opacity-80" style={{ transform: 'rotate(-8deg)', boxShadow: '0 4px 0 rgba(94,200,255,.25), 0 -4px 0 rgba(94,200,255,.25)' }} />
-              <span className="text-[13px] mt-[3px] tracking-tight">洋</span>
+              style={{ background: 'linear-gradient(140deg, #0d2438, #081827)', border: '1px solid rgba(126, 170, 210, 0.28)' }}>
+              <span className="absolute left-[5px] right-[5px] top-1/2 h-px bg-[#6d93b4]" style={{ transform: 'translateY(-3px) rotate(-6deg)' }} />
+              <span className="text-[13px] text-[#cfdcea] mt-[1px] tracking-tight">洋</span>
             </span>
             <span className="leading-none">
               <span className="block text-[15px] font-bold tracking-wide">OCEAN FLOW</span>

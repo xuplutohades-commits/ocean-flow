@@ -37,7 +37,7 @@ function CurrentParticles() {
       const c = CURRENTS.find((x) => x.id === id);
       if (!c) continue;
       const p = pathOf(c, 'summer');
-      const colv = c.type === 'warm' ? [1.0, 0.62, 0.36] : [0.37, 0.78, 1.0];
+      const colv = c.type === 'warm' ? [0.72, 0.55, 0.42] : [0.45, 0.62, 0.78];
       for (let i = 0; i < p.length; i += 1) {
         const v = lngLatToVec(p[i][0], p[i][1]);
         pos.push(v.x, v.y, v.z);
@@ -49,7 +49,7 @@ function CurrentParticles() {
   }, []);
 
   const uniforms = useMemo(
-    () => ({ uTime: { value: 0 }, uSize: { value: 3.2 * Math.min(window.innerWidth, 1400) / 1400 } }),
+    () => ({ uTime: { value: 0 }, uSize: { value: 1.7 * Math.min(window.innerWidth, 1400) / 1400 } }),
     [],
   );
 
@@ -68,7 +68,7 @@ function CurrentParticles() {
       vColor = aColor;
       vec3 p = position + normal * (0.012 + 0.008 * sin(uTime * 1.6 + aSeed));
       vec4 mv = modelViewMatrix * vec4(p, 1.0);
-      gl_PointSize = uSize * (2.0 + sin(uTime * 2.0 + aSeed)) * (280.0 / -mv.z);
+      gl_PointSize = uSize * (1.6 + sin(uTime * 2.0 + aSeed) * 0.7) * (280.0 / -mv.z);
       gl_Position = projectionMatrix * mv;
     }
   `;
@@ -77,7 +77,7 @@ function CurrentParticles() {
     void main() {
       vec2 c = gl_PointCoord - 0.5;
       float d = length(c);
-      float a = smoothstep(0.5, 0.05, d) * 0.9;
+      float a = smoothstep(0.5, 0.08, d) * 0.45;
       gl_FragColor = vec4(vColor, a);
     }
   `;
@@ -102,17 +102,66 @@ function CurrentParticles() {
   );
 }
 
+function useDimTexture(): THREE.Texture | null {
+  const raw = useLoader(THREE.TextureLoader, '/textures/earth.jpg');
+  return useMemo(() => {
+    if (!raw.image || (raw.image as HTMLImageElement).width < 10) return raw;
+    const c = document.createElement('canvas');
+    c.width = 1024;
+    c.height = 512;
+    const ctx = c.getContext('2d');
+    if (!ctx) return raw;
+    ctx.clearRect(0, 0, c.width, c.height);
+    ctx.drawImage(raw.image, 0, 0, c.width, c.height);
+    // 轻度压暗 + 降饱和：保留大陆轮廓与蓝色海洋，整体沉入深海色调
+    ctx.globalCompositeOperation = 'multiply';
+    ctx.fillStyle = 'rgba(12, 24, 37, 0.79)';
+    ctx.fillRect(0, 0, c.width, c.height);
+    ctx.globalCompositeOperation = 'luminosity';
+    ctx.globalAlpha = 0.38;
+    ctx.drawImage(c, 0, 0, c.width, c.height);
+    ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
+    const tex = new THREE.CanvasTexture(c);
+    tex.colorSpace = THREE.SRGBColorSpace;
+    tex.anisotropy = 4;
+    return tex;
+  }, [raw]);
+}
+
+/** 水面反光：一束缓慢环绕的“阳光”，像日光在高光洋面上滑动 */
+function SunGlint() {
+  const lightRef = useRef<THREE.DirectionalLight>(null);
+  useFrame(({ clock }) => {
+    const t = clock.getElapsedTime();
+    if (lightRef.current) {
+      lightRef.current.position.set(
+        Math.cos(t * 0.11) * 6,
+        Math.sin(t * 0.05) * 3.4,
+        Math.sin(t * 0.11) * 6,
+      );
+    }
+  });
+  return <directionalLight ref={lightRef} intensity={0.85} color="#dceefc" />;
+}
+
 function Earth() {
-  const texture = useLoader(THREE.TextureLoader, '/textures/earth.jpg');
-  useMemo(() => {
-    texture.colorSpace = THREE.SRGBColorSpace;
-    texture.anisotropy = 4;
-  }, [texture]);
+  const texture = useDimTexture();
+  const meshRef = useRef<THREE.Mesh>(null);
+  useFrame((_, delta) => {
+    if (meshRef.current) meshRef.current.rotation.y += delta * 0.05;
+  });
   return (
     <group>
-      <mesh rotation={[0, 0, 0]}>
+      <mesh ref={meshRef}>
         <sphereGeometry args={[1, 96, 96]} />
-        <meshStandardMaterial map={texture} roughness={0.85} metalness={0.08} color="#cfe4ff" />
+        {/* Phong 高光 = 海面波光；颜色覆盖轻微提亮，保证大陆清晰 */}
+        <meshPhongMaterial
+          map={texture}
+          shininess={18}
+          specular={new THREE.Color('#6f92ab')}
+          color={new THREE.Color('#b7c9d6')}
+        />
       </mesh>
       <CurrentParticles />
     </group>
@@ -144,9 +193,9 @@ function Atmosphere() {
           varying vec3 vNormal;
           uniform float uTime;
           void main() {
-            float glow = pow(0.72 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 2.8);
-            float flick = 0.85 + 0.15 * sin(uTime * 0.7);
-            gl_FragColor = vec4(0.45, 0.78, 1.0, glow * 0.6 * flick);
+            float glow = pow(0.72 - dot(vNormal, vec3(0.0, 0.0, 1.0)), 3.2);
+            float flick = 0.9 + 0.1 * sin(uTime * 0.5);
+            gl_FragColor = vec4(0.42, 0.62, 0.82, glow * 0.22 * flick);
           }
         `}
         transparent
@@ -164,24 +213,25 @@ export default function GlobeCanvas({ className = '', interactive = true }: { cl
       <div aria-hidden className="absolute inset-0 pointer-events-none" style={{
         position: 'absolute', inset: 0,
         background:
-          'radial-gradient(circle at 50% 46%, rgba(84, 168, 222, 0.24), rgba(10, 46, 84, 0.16) 42%, transparent 60%),' +
-          'radial-gradient(circle at 50% 46%, rgba(3, 16, 32, 0.9) 0%, transparent 66%)',
+          'radial-gradient(circle at 50% 46%, rgba(46, 96, 138, 0.14), rgba(8, 32, 56, 0.10) 44%, transparent 62%),' +
+          'radial-gradient(circle at 50% 46%, rgba(2, 10, 20, 0.85) 0%, transparent 68%)',
       }} />
       <Canvas dpr={[1, 1.8]} camera={{ position: [0, 1.05, 3.45], fov: 42 }} gl={{ antialias: true, alpha: true, preserveDrawingBuffer: true }} style={{ background: 'transparent' }}>
-        <ambientLight intensity={interactive ? 1.15 : 1.0} />
-        <directionalLight position={[4, 3, 6]} intensity={1.6} />
-        <Stars radius={90} depth={50} count={2600} factor={3.2} saturation={0} fade speed={0.5} />
+        <ambientLight intensity={0.55} />
+        <directionalLight position={[4, 3, 6]} intensity={0.82} />
+        <SunGlint />
+        <Stars radius={90} depth={50} count={700} factor={2.2} saturation={0} fade speed={0.3} />
         <Earth />
         <Atmosphere />
         <OrbitControls
           enablePan={false}
           enableZoom={false}
-          autoRotate
-          autoRotateSpeed={0.55}
-          rotateSpeed={0.4}
+          autoRotate={false}
+          rotateSpeed={0.35}
           enabled={interactive}
         />
       </Canvas>
+
     </div>
   );
 }
