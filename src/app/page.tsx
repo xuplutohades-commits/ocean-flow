@@ -25,8 +25,8 @@ export default function Home() {
         <div aria-hidden className="absolute inset-0 pointer-events-none"
           style={{
             background:
-              'radial-gradient(900px 620px at 8% 18%, rgba(22, 82, 132, 0.35), transparent 60%),' +
-              'radial-gradient(700px 700px at 92% 85%, rgba(9, 40, 74, 0.5), transparent 55%)',
+              'radial-gradient(900px 620px at 8% 18%, rgba(26, 96, 152, 0.4), transparent 60%),' +
+              'radial-gradient(700px 700px at 92% 85%, rgba(16, 64, 106, 0.55), transparent 55%)',
           }} />
         <div className="mx-auto max-w-[1500px] w-full px-6 lg:px-10 grid lg:grid-cols-[1.05fr_1fr] gap-8 items-center relative z-10">
           <div>
@@ -36,7 +36,7 @@ export default function Home() {
             <Reveal delay={0.32}>
               <div className="mt-6 flex items-center gap-6 text-[11.5px] text-[#5f7b99]">
                 <DotLegend />
-                <span className="hidden md:inline">拖动地球查看 · 箭头方向即洋流流向</span>
+                <span className="hidden md:inline">拖动地球查看 · 粒子沿洋流流动</span>
               </div>
             </Reveal>
           </div>
@@ -44,7 +44,7 @@ export default function Home() {
           <div className="relative h-[52vh] md:h-[72vh] lg:h-[82vh] hidden md:block">
             <div aria-hidden className="absolute inset-0 rounded-full"
               style={{
-                background: 'radial-gradient(circle, rgba(12, 52, 92, 0.5), transparent 62%)',
+                background: 'radial-gradient(circle, rgba(22, 102, 168, 0.45), transparent 62%)',
                 filter: 'blur(10px)',
               }} />
             <div className="absolute inset-0 animate-floaty">
@@ -55,9 +55,9 @@ export default function Home() {
               <div className="kicker-dim">DRAG TO ROTATE</div>
             </div>
             <div aria-hidden className="absolute bottom-[8%] right-[2%] flex flex-col items-end gap-1.5 select-none" style={{ pointerEvents: 'none' }}>
-              <span className="badge" style={{ background: 'rgba(4,14,28,0.75)', color: '#ffb072', borderColor: 'rgba(255,176,114,0.35)' }}>▶ 暖流</span>
-              <span className="badge" style={{ background: 'rgba(4,14,28,0.75)', color: '#6fc9ff', borderColor: 'rgba(111,201,255,0.35)' }}>▶ 寒流</span>
-              <span className="badge" style={{ background: 'rgba(4,14,28,0.75)', color: '#a9c3de' }}>→ 流向</span>
+              <span className="badge" style={{ background: 'rgba(10,24,42,0.8)', color: '#ffb072', borderColor: 'rgba(255,176,114,0.35)' }}>● 暖流</span>
+              <span className="badge" style={{ background: 'rgba(10,24,42,0.8)', color: '#6fc9ff', borderColor: 'rgba(111,201,255,0.35)' }}>● 寒流</span>
+              <span className="badge" style={{ background: 'rgba(10,24,42,0.8)', color: '#a9c3de' }}>粒子流动</span>
             </div>
           </div>
         </div>
