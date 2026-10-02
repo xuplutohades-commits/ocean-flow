@@ -3,15 +3,12 @@ import { useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useLoader } from '@react-three/fiber';
 import { OrbitControls, Stars } from '@react-three/drei';
 import * as THREE from 'three';
-import { CURRENTS, pathOf } from '@/data/currents';
-import { samplePath, pointAt } from '@/lib/geo';
-import type { SampledPath } from '@/lib/geo';
+import { CURRENT_MAP, pathOf } from '@/data/currents';
+import { samplePath } from '@/lib/geo';
 
 const R = 1.0;
-/** 粒子层略高于球面，避免与贴图 z-fighting，同时被球面正确遮挡 */
-const FLOW_R = 1.009;
 
-function lngLatToVec(lng: number, lat: number, r = FLOW_R, out?: THREE.Vector3): THREE.Vector3 {
+function lngLatToVec(lng: number, lat: number, r = 1, out?: THREE.Vector3): THREE.Vector3 {
   const phi = ((90 - lat) * Math.PI) / 180;
   const theta = ((lng + 180) * Math.PI) / 180;
   const v = out ?? new THREE.Vector3();
@@ -22,20 +19,9 @@ function lngLatToVec(lng: number, lat: number, r = FLOW_R, out?: THREE.Vector3):
   );
 }
 
-interface FlowItem {
-  sp: SampledPath;
-  s: number;        // 沿路径的当前位置（度）
-  speed: number;    // 角速度 °/s
-  len: number;      // 线段弧长（度）
-  band: number;     // 该洋流流带半宽（度）
-  edge: number;     // 横向位置 u ~ N(0,1)：决定密度/速度/颜色梯度
-  phase: number;    // 横向微摆相位
-  warm: boolean;
-  age: number;
-  life: number;
-  px: number; py: number; pz: number; // 上一帧头部位置（短拖尾）
-}
 
+
+/** 水面反光：一束缓慢环绕的“阳光”，像日光在高光洋面上滑动 */
 /** 固定种子 PRNG：让组件在渲染期保持纯函数（随机只在模块构建期发生一次） */
 function mulberry32(seed: number) {
   let s = seed | 0;
@@ -47,164 +33,245 @@ function mulberry32(seed: number) {
   };
 }
 
-/** 溶于深海背景色的“淡出尾色”基准 */
-const DEEP_OCEAN: [number, number, number] = [0.04, 0.14, 0.24];
-const WARM: [number, number, number] = [1.0, 0.46, 0.2];
-const COLD: [number, number, number] = [0.28, 0.66, 1.0];
-
 const DEG2RAD = Math.PI / 180;
 
+/* ── 流场参数：当前只做日本暖流（黑潮）─────────────────────────
+ * 视觉目标：日本东侧一条“正在流动的橙色海流带”——有宽度、核心主流、
+ * 边缘减速渐隐、柔和渐变尾迹。验证满意后把其他洋流的 id 加入 FLOW_IDS。
+ */
+const FLOW_IDS = ['kuroshio'];
+const TRAIL_N = 7;                                            // 每粒子尾迹点数
+const TRAIL_W: number[] = [0.05, 0.13, 0.23, 0.35, 0.52, 0.74, 1.0]; // 尾→头 alpha 权重
+const TRAIL_STEP = 7;                                         // 每 N 帧记录一个尾迹点
+const HALF_BAND_DEG = 4.6;                                    // 流带半宽（速度场 σ）
+const CORE_SPEED_DEG = 1.35;                                  // 核心带参考流速 °/s
+const PARTICLE_COUNT = 2100;
+
+/** 洋流中心线片段：单位球面上的位置 + 流向切向量（构成连续速度场） */
+interface FieldSeg {
+  q: THREE.Vector3;
+  t: THREE.Vector3;
+}
+
+interface FlowParticle2 {
+  dir: THREE.Vector3;            // 单位方向（球心→表面）
+  rad: number;                   // 距球心半径（轻微深度变化）
+  speedF: number;                // 个体速度差
+  life: number;
+  age: number;
+  opacity: number;               // 个体透明度变化
+  seed: number;
+  step: number;                  // 尾迹记录节拍
+  trail: THREE.Vector3[];        // 尾迹（已乘 rad，head 在末尾）
+}
+
+/** 由洋流路径构建连续速度场：中心线按 0.3° 采样 + 表面切向 */
+function buildFlowField(): FieldSeg[] {
+  const segs: FieldSeg[] = [];
+  const tmp = new THREE.Vector3();
+  for (const id of FLOW_IDS) {
+    const c = CURRENT_MAP[id];
+    if (!c) continue;
+    const sp = samplePath(pathOf(c, 'summer'), 0.3);
+    const qs: THREE.Vector3[] = [];
+    for (const [lng, lat] of sp.pts) qs.push(lngLatToVec(lng, lat, 1));
+    for (let i = 0; i < qs.length - 1; i++) {
+      const q = qs[i];
+      const t = tmp.copy(qs[i + 1]).sub(q);
+      t.addScaledVector(q, -t.dot(q));
+      t.normalize();
+      segs.push({ q: q.clone(), t: t.clone() });
+    }
+  }
+  return segs;
+}
+
+/** 在流带内生成粒子：高斯横向偏移 → 中心密、边缘稀；个体参数随机变化 */
+function spawnParticle(seg: FieldSeg, rnd: () => number, freshAge: boolean): FlowParticle2 {
+  const g = Math.max(-2.2, Math.min(2.2, (rnd() + rnd() + rnd() - 1.5) / 0.5));
+  const perp = new THREE.Vector3().crossVectors(seg.q, seg.t).normalize();
+  const dir = new THREE.Vector3()
+    .copy(seg.q)
+    .addScaledVector(perp, g * 0.6 * HALF_BAND_DEG * DEG2RAD)
+    .normalize();
+  const rad = 1.003 + rnd() * 0.009;
+  const pos = dir.clone().multiplyScalar(rad);
+  const trail: THREE.Vector3[] = [];
+  for (let k = 0; k < TRAIL_N; k++) trail.push(pos.clone());
+  const life = 7 + rnd() * 9;
+  return {
+    dir,
+    rad,
+    speedF: 0.7 + rnd() * 0.6,
+    life,
+    age: freshAge ? rnd() * life : 0,
+    opacity: 0.38 + rnd() * 0.6,
+    seed: rnd() * 100,
+    step: 0,
+    trail,
+  };
+}
+
+const FLOW_VS =
+  'attribute float aAlpha;\n' +
+  'varying vec3 vColor;\n' +
+  'varying float vAlpha;\n' +
+  'void main() {\n' +
+  '  vColor = color;\n' +
+  '  vAlpha = aAlpha;\n' +
+  '  vec4 mv = modelViewMatrix * vec4(position, 1.0);\n' +
+  '  gl_Position = projectionMatrix * mv;\n' +
+  '  float facing = clamp(dot(normalize(position), normalize(cameraPosition)), 0.0, 1.0);\n' +
+  '  vAlpha *= 0.35 + 0.65 * facing;\n' +
+  '}\n';
+const FLOW_FS =
+  'varying vec3 vColor;\n' +
+  'varying float vAlpha;\n' +
+  'uniform float uOpacity;\n' +
+  'void main() {\n' +
+  '  gl_FragColor = vec4(vColor, vAlpha * uOpacity);\n' +
+  '}\n';
+
 /**
- * 球面流场粒子（带状流体模型）：
- * 每条洋流不是一条线，而是一个“流带”——粒子按高斯分布铺在中心线两侧，
- * 核心带粒子更密、更快、更亮，边缘更稀、更慢、更淡；粒子带短拖尾沿球面流动。
- * 与平面地图同一套 CURRENTS 数据，全部粒子合并为一次 draw call 的 LineSegments。
+ * 球面连续流场：粒子 position → sample velocity field → move → trail → fade → respawn。
+ * 方向始终由所在位置的局部矢量场决定；尾迹沿流场弯曲并以 alpha 渐变淡出，
+ * 视觉上是“水在流动”而不是“短线群”。
  */
 function CurrentFlow() {
-  const items = useMemo<FlowItem[]>(() => {
+  const field = useMemo(() => buildFlowField(), []);
+  const items = useMemo<FlowParticle2[]>(() => {
     const rnd = mulberry32(20261002);
-    const list: FlowItem[] = [];
-    for (const c of CURRENTS) {
-      const sp = samplePath(pathOf(c, 'summer'), 0.6);
-      const total = sp.total;
-      if (total < 4) continue;
-      const span = c.width ?? 1;
-      const strength = 0.55 + span * 0.55;
-      // 流带半宽随洋流强弱变化（度）；核心带密度 ∝ 长度 × 宽度
-      const band = 1.5 + span * 2.1;
-      const n = Math.min(900, Math.max(12, Math.round((total / 1.15) * (0.8 + span * 0.6))));
-      for (let i = 0; i < n; i++) {
-        const life = 6 + rnd() * 10;
-        list.push({
-          sp,
-          s: rnd() * total,
-          speed: (2.4 + 2.4 * strength) * (0.75 + rnd() * 0.5),
-          len: 2.4 + rnd() * 4.6,
-          band,
-          edge: Math.max(-2, Math.min(2, (rnd() + rnd() + rnd() - 1.5) / 0.5)),
-          phase: rnd() * Math.PI * 2,
-          warm: c.type === 'warm',
-          age: rnd() * life,
-          life,
-          px: 0, py: 0, pz: 0,
-        });
-      }
-      if (list.length >= 5400) break;
+    const list: FlowParticle2[] = [];
+    for (let i = 0; i < PARTICLE_COUNT && field.length; i++) {
+      list.push(spawnParticle(field[Math.floor(rnd() * field.length)], rnd, true));
     }
-    return list.slice(0, 5400);
-  }, []);
+    return list;
+  }, [field]);
 
-  // 每个粒子 4 个顶点：头部/尾部（流线短段）+ 上一帧位置（淡出拖尾）
+  const segV = (TRAIL_N - 1) * 2;
   const posAttr = useMemo(() => {
-    const a = new THREE.BufferAttribute(new Float32Array(items.length * 12), 3);
+    const a = new THREE.BufferAttribute(new Float32Array(items.length * segV * 3), 3);
     a.setUsage(THREE.DynamicDrawUsage);
     return a;
-  }, [items]);
+  }, [items, segV]);
   const colAttr = useMemo(
-    () => new THREE.BufferAttribute(new Float32Array(items.length * 12), 3),
-    [items],
+    () => new THREE.BufferAttribute(new Float32Array(items.length * segV * 3), 3),
+    [items, segV],
+  );
+  const alpAttr = useMemo(
+    () => new THREE.BufferAttribute(new Float32Array(items.length * segV), 1),
+    [items, segV],
   );
   const geo = useMemo(() => {
     const g = new THREE.BufferGeometry();
     g.setAttribute('position', posAttr);
     g.setAttribute('color', colAttr);
+    g.setAttribute('aAlpha', alpAttr);
     return g;
-  }, [posAttr, colAttr]);
+  }, [posAttr, colAttr, alpAttr]);
   const mat = useMemo(
     () =>
-      new THREE.LineBasicMaterial({
+      new THREE.ShaderMaterial({
+        uniforms: { uOpacity: { value: 0.5 } },
         vertexColors: true,
         transparent: true,
-        opacity: 0.95,
         depthWrite: false,
         blending: THREE.NormalBlending,
+        vertexShader: FLOW_VS,
+        fragmentShader: FLOW_FS,
       }),
     [],
   );
 
-  const tmpN = useMemo(() => new THREE.Vector3(), []);
   const tmpT = useMemo(() => new THREE.Vector3(), []);
   const tmpP = useMemo(() => new THREE.Vector3(), []);
-  const tmpA = useMemo(() => new THREE.Vector3(), []);
-  const tmpB = useMemo(() => new THREE.Vector3(), []);
+  const tmpV = useMemo(() => new THREE.Vector3(), []);
 
   useFrame((_, delta) => {
     const d = Math.min(delta, 0.05);
+    if (!field.length) return;
     const pos = posAttr.array as Float32Array;
     const col = colAttr.array as Float32Array;
+    const alp = alpAttr.array as Float32Array;
+    const sig = HALF_BAND_DEG * DEG2RAD;
     for (let i = 0; i < items.length; i++) {
       const it = items[i];
-      const total = it.sp.total;
-      it.age += d;
-      if (it.age > it.life) {
-        it.age = 0;
-        it.s = Math.random() * total;
+      // 1) 采样局部流场：最近中心线点（弦距离，与弧距单调等价）
+      let best = 0;
+      let bd = Infinity;
+      for (let j = 0; j < field.length; j++) {
+        const dd = it.dir.distanceToSquared(field[j].q);
+        if (dd < bd) { bd = dd; best = j; }
       }
-      const escape = Math.min(1, Math.abs(it.edge) / 2);
-      // 边缘粒子更慢（速度梯度）
-      it.s += it.speed * (1 - 0.35 * escape * escape) * d;
-      if (it.s >= total) it.s -= total;
+      const seg = field[best];
+      const w = Math.exp(-bd / (2 * sig * sig));
+      // 2) 更新速度：切向平流 + 轻微横向游动（方向仍由流场决定）
+      tmpT.copy(seg.t).addScaledVector(it.dir, -seg.t.dot(it.dir)).normalize();
+      tmpP.crossVectors(it.dir, tmpT).normalize();
+      const spd = CORE_SPEED_DEG * DEG2RAD * it.speedF * (0.8 + 0.25 * Math.sin(it.age * 0.5 + it.seed));
+      const drift = (0.04 + 0.07 * Math.sin(it.age * 0.6 + it.seed * 0.17)) * DEG2RAD;
+      tmpV.copy(tmpT).multiplyScalar(spd * w).addScaledVector(tmpP, drift * w);
+      // 3) 移动（贴合球面曲率）
+      it.dir.addScaledVector(tmpV, d).normalize();
 
-      // 中心流线上的两个点 → 球面切向
-      const [a1, b1] = pointAt(it.sp, it.s);
-      const sn = it.s + 1.4 >= total ? it.s + 1.4 - total : it.s + 1.4;
-      const [a2, b2] = pointAt(it.sp, sn);
-      lngLatToVec(a1, b1, 1, tmpN);
-      lngLatToVec(a2, b2, 1, tmpT);
-      tmpT.sub(tmpN);
-      // 切向投影到球面切平面
-      const ndot = tmpT.dot(tmpN);
-      tmpT.x -= tmpN.x * ndot;
-      tmpT.y -= tmpN.y * ndot;
-      tmpT.z -= tmpN.z * ndot;
-      tmpT.normalize();
-      // 球面法线方向上的横向基（在球面上垂直流向）
-      tmpP.crossVectors(tmpN, tmpT).normalize();
-
-      // 高斯横向偏移 + 沿路径的微摆 → 形成有宽度的流带
-      const lateral = (it.edge * it.band + Math.sin(it.s * 0.21 + it.phase) * 0.8) * DEG2RAD;
-      tmpN.addScaledVector(tmpP, lateral).normalize();
-
-      // 流线短段（贴合球面曲率）
-      const halfLen = (it.len * 0.5) * DEG2RAD;
-      tmpA.copy(tmpN).addScaledVector(tmpT, halfLen).multiplyScalar(FLOW_R);
-      tmpB.copy(tmpN).addScaledVector(tmpT, -halfLen).multiplyScalar(FLOW_R);
-
-      const o = i * 12;
-      pos[o] = tmpA.x; pos[o + 1] = tmpA.y; pos[o + 2] = tmpA.z;       // 头部（亮）
-      pos[o + 3] = tmpB.x; pos[o + 4] = tmpB.y; pos[o + 5] = tmpB.z;   // 尾部（淡）
-      pos[o + 6] = it.px; pos[o + 7] = it.py; pos[o + 8] = it.pz;      // 上一帧位置（拖尾）
-      pos[o + 9] = tmpA.x; pos[o + 10] = tmpA.y; pos[o + 11] = tmpA.z; // 拖尾终点（头部）
-      it.px = tmpA.x; it.py = tmpA.y; it.pz = tmpA.z;
-
-      // 生命周期淡入淡出 + 边缘渐变（核心亮、边缘暗）+ 头亮尾淡
-      const fi = Math.min(1, it.age / 0.9);
-      const fo = Math.min(1, (it.life - it.age) / 2.2);
+      it.age += d;
+      const fi = Math.min(1, it.age / 1.1);
+      const fo = Math.min(1, (it.life - it.age) / 2.4);
       const f = Math.max(0, Math.min(fi, fo));
-      const edgeFade = 1 - 0.42 * escape * escape;
-      const base = it.warm ? WARM : COLD;
-      const hx = Math.min(1, base[0] * (0.68 + 0.32 * f) * edgeFade);
-      const hy = Math.min(1, base[1] * (0.68 + 0.32 * f) * edgeFade);
-      const hz = Math.min(1, base[2] * (0.68 + 0.32 * f) * edgeFade);
-      col[o] = hx; col[o + 1] = hy; col[o + 2] = hz;
-      col[o + 3] = hx + (DEEP_OCEAN[0] - hx) * 0.62;
-      col[o + 4] = hy + (DEEP_OCEAN[1] - hy) * 0.62;
-      col[o + 5] = hz + (DEEP_OCEAN[2] - hz) * 0.62;
-      col[o + 6] = hx + (DEEP_OCEAN[0] - hx) * 0.78;
-      col[o + 7] = hy + (DEEP_OCEAN[1] - hy) * 0.78;
-      col[o + 8] = hz + (DEEP_OCEAN[2] - hz) * 0.78;
-      col[o + 9] = hx + (DEEP_OCEAN[0] - hx) * 0.55;
-      col[o + 10] = hy + (DEEP_OCEAN[1] - hy) * 0.55;
-      col[o + 11] = hz + (DEEP_OCEAN[2] - hz) * 0.55;
+      const alpha = it.opacity * (0.3 + 0.7 * w) * f;
+
+      // 4) 尾迹记录（每 TRAIL_STEP 帧一个点，控制尾巴长度）
+      it.step += 1;
+      if (it.step >= TRAIL_STEP) {
+        it.step = 0;
+        it.trail.push(it.dir.clone().multiplyScalar(it.rad));
+        if (it.trail.length > TRAIL_N) it.trail.shift();
+      }
+
+      // 5) 生命周期结束或离开流场 → 重生
+      if (it.age > it.life || w < 0.03) {
+        const np = spawnParticle(seg, Math.random, false);
+        it.dir.copy(np.dir);
+        it.rad = np.rad;
+        it.speedF = np.speedF;
+        it.life = np.life;
+        it.age = np.age;
+        it.opacity = np.opacity;
+        it.seed = np.seed;
+        it.step = 0;
+        it.trail = np.trail;
+      }
+
+      // 6) 写入顶点：每粒子 (TRAIL_N-1) 段，段间 alpha 渐变、头亮尾淡
+      const o = i * segV;
+      const tint = 0.9 + 0.1 * Math.sin(it.seed * 1.7);
+      for (let kk = 0; kk < TRAIL_N - 1; kk++) {
+        const va = it.trail[kk];
+        const vb = it.trail[kk + 1];
+        const vx = (o + kk * 2) * 3;
+        pos[vx] = va.x; pos[vx + 1] = va.y; pos[vx + 2] = va.z;
+        pos[vx + 3] = vb.x; pos[vx + 4] = vb.y; pos[vx + 5] = vb.z;
+        const wA = TRAIL_W[kk];
+        const wB = TRAIL_W[kk + 1];
+        const cfA = 0.42 + 0.58 * wA;
+        const cfB = 0.42 + 0.58 * wB;
+        col[vx] = Math.min(1, 0.92 * cfA * tint);
+        col[vx + 1] = Math.min(1, 0.5 * cfA * tint);
+        col[vx + 2] = Math.min(1, 0.22 * cfA * tint);
+        col[vx + 3] = Math.min(1, 0.92 * cfB * tint);
+        col[vx + 4] = Math.min(1, 0.5 * cfB * tint);
+        col[vx + 5] = Math.min(1, 0.22 * cfB * tint);
+        alp[o + kk * 2] = wA * alpha;
+        alp[o + kk * 2 + 1] = wB * alpha;
+      }
     }
     posAttr.needsUpdate = true;
     colAttr.needsUpdate = true;
+    alpAttr.needsUpdate = true;
   });
 
   return <lineSegments geometry={geo} material={mat} frustumCulled={false} />;
 }
-
-/** 水面反光：一束缓慢环绕的“阳光”，像日光在高光洋面上滑动 */
 function SunGlint() {
   const lightRef = useRef<THREE.DirectionalLight>(null);
   useFrame(({ clock }) => {
