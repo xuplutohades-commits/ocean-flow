@@ -6,11 +6,18 @@ import { project, unproject, samplePath, distToPath, pointAt, bboxOf, clamp, typ
 import { pseudoNoise } from '@/lib/noise';
 import type { OceanCurrent, Season, WindArrow } from '@/types';
 
-const T_WARM = '#d14f1c';
-const T_COLD = '#1763a6';
+const T_WARM = '#ed7a3a'; // 柔和暖橙
+const T_COLD = '#3fa7de'; // 青蓝
 const T_WARM_TEXT = '#a84417';
 const T_COLD_TEXT = '#135c93';
 const tCol = (warm: boolean) => (warm ? T_WARM : T_COLD);
+
+/** 默认只显示的主要洋流；放大后其余洋流再逐步出现 */
+const MAJOR_IDS = new Set([
+  'kuroshio', 'northPacCurrent', 'californiaCurrent', 'oyashio',
+  'gulfStream', 'northAtlanticCurrent', 'brazilCurrent', 'peruCurrent',
+  'westWindS', 'agulhas', 'monsoonSummer', 'eastAustralia',
+]);
 
 export interface PollutionSource {
   lng: number;
@@ -156,12 +163,20 @@ class MapEngine {
   hovered: string | null = null;
   land: { x: number; y: number }[][] = [];
   landReady = false;
+  maskCanvas = document.createElement('canvas');
+  maskCtx: CanvasRenderingContext2D | null = this.maskCanvas.getContext('2d', { willReadFrequently: true });
+  maskData: Uint8ClampedArray | null = null;
+  maskCols = 0;
+  maskRows = 0;
+  maskReady = false;
+  maskCell = 4;
   raf = 0;
   last = 0;
   time = 0;
   dragging = false;
   lastPt = { x: 0, y: 0 };
   disposed = false;
+  needsFit = true; // 首次拿到真实画布尺寸时自动适配全局视图
   onTrackerMove?: OceanMapProps['onTrackerMove'];
   trackerReport = 0;
 
@@ -184,6 +199,13 @@ class MapEngine {
   resize(w: number, h: number) {
     this.w = w; this.h = h;
     this.dpr = Math.min(window.devicePixelRatio || 1, 2);
+    // 构造期默认画布是 800x500，首次真实尺寸到达时重算初始视野，
+    // 避免世界地图只占画布一部分、两侧露出大片空白边缘
+    if (this.needsFit) {
+      this.needsFit = false;
+      this.view = this.fitWorld();
+      this.target = null;
+    }
     this.canvas.width = Math.round(w * this.dpr);
     this.canvas.height = Math.round(h * this.dpr);
     this.base.width = Math.round(w * this.dpr);
@@ -214,27 +236,31 @@ class MapEngine {
     const { w, h } = this;
     b.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     b.clearRect(0, 0, w, h);
-    // 海洋底色（跟随视窗的滚动可能有裁剪，这里画满即可）
+    // 深海蓝海洋底色（垂直层次），低对比、通透
     const g = b.createLinearGradient(0, 0, 0, h);
-    g.addColorStop(0, '#dfeaf3');
-    g.addColorStop(0.5, '#d3e4f0');
-    g.addColorStop(1, '#c2d9e9');
+    g.addColorStop(0, '#061524');
+    g.addColorStop(0.42, '#082335');
+    g.addColorStop(0.72, '#0a2d45');
+    g.addColorStop(1, '#0d3a55');
     b.fillStyle = g;
     b.fillRect(0, 0, w, h);
-    // 柔和光斑
-    const spots: [number, number, number][] = [
-      [0.22, 0.28, 0.28], [0.68, 0.4, 0.22], [0.45, 0.75, 0.24], [0.85, 0.2, 0.18],
+    // 深海青蓝微光（克制的空间层次，非热力图）
+    const spots: [number, number, number, string][] = [
+      [0.62, 0.32, 0.36, '86, 190, 235'],
+      [0.35, 0.62, 0.33, '70, 160, 210'],
+      [0.2, 0.18, 0.28, '90, 200, 240'],
+      [0.85, 0.78, 0.23, '60, 150, 200'],
     ];
-    for (const [sx, sy, a] of spots) {
-      const rg = b.createRadialGradient(sx * w, sy * h, 0, sx * w, sy * h, 0.45 * Math.min(w, h));
-      rg.addColorStop(0, `rgba(255, 255, 255, ${a})`);
-      rg.addColorStop(1, 'rgba(255,255,255,0)');
+    for (const [sx, sy, rad, rgb] of spots) {
+      const rg = b.createRadialGradient(sx * w, sy * h, 0, sx * w, sy * h, rad * Math.min(w, h));
+      rg.addColorStop(0, 'rgba(' + rgb + ',0.10)');
+      rg.addColorStop(1, 'rgba(' + rgb + ',0)');
       b.fillStyle = rg;
       b.fillRect(0, 0, w, h);
     }
-    // 网格
+    // 网格：极淡辅助线，不再抢视觉焦点
     if (this.opts.showGraticule !== false) {
-      b.strokeStyle = 'rgba(60, 105, 145, 0.16)';
+      b.strokeStyle = 'rgba(140, 190, 230, 0.055)';
       b.lineWidth = 1;
       b.beginPath();
       for (let lg = -180; lg <= 180; lg += 30) {
@@ -248,23 +274,21 @@ class MapEngine {
         b.moveTo(0, y); b.lineTo(w, y);
       }
       b.stroke();
-      // 赤道与回归线
-      for (const [lt, col] of [[0, 'rgba(52, 120, 180, 0.32)'], [23.4, 'rgba(120, 90, 40, 0.12)'], [-23.4, 'rgba(120, 90, 40, 0.12)']] as const) {
+      for (const [lt, col] of [[0, 'rgba(120, 185, 225, 0.12)'], [23.4, 'rgba(160, 180, 150, 0.05)'], [-23.4, 'rgba(160, 180, 150, 0.05)']] as const) {
         const y = (this.view.lat0 - lt) * this.view.scale;
         b.strokeStyle = col;
         b.beginPath(); b.moveTo(0, y); b.lineTo(w, y); b.stroke();
       }
     }
-    // 陆地
+    // 陆地：暗色低对比；同时生成 ocean mask（1/4 分辨率）
     if (this.landReady) {
-      b.fillStyle = '#f1ebdd';
+      b.fillStyle = '#223039';
       for (const poly of this.land) {
         b.beginPath();
         let started = false;
         for (const pt of poly) {
           const x = (pt.x * 360 - 180 - this.view.lng0) * this.view.scale;
           const y = (this.view.lat0 - (90 - pt.y * 180)) * this.view.scale;
-          // 跳过超出画布过远的点（含跨 180° 断点）
           if (!started) { b.moveTo(x, y); started = true; }
           else b.lineTo(x, y);
         }
@@ -272,7 +296,7 @@ class MapEngine {
         b.fill();
       }
       // 海岸线
-      b.strokeStyle = 'rgba(95, 115, 135, 0.5)';
+      b.strokeStyle = 'rgba(150, 200, 230, 0.16)';
       b.lineWidth = 1;
       for (const poly of this.land) {
         b.beginPath();
@@ -285,16 +309,58 @@ class MapEngine {
         }
         b.stroke();
       }
+      // ── ocean mask：洋流只允许出现在海上 ──
+      const mc = this.maskCanvas;
+      const mw = Math.max(2, Math.round(w / this.maskCell));
+      const mh = Math.max(2, Math.round(h / this.maskCell));
+      if (mc.width !== mw) mc.width = mw;
+      if (mc.height !== mh) mc.height = mh;
+      const mb = this.maskCtx!;
+      mb.setTransform(1, 0, 0, 1, 0, 0);
+      mb.clearRect(0, 0, mw, mh);
+      mb.fillStyle = '#000';
+      const k = this.view.scale / this.maskCell;
+      for (const poly of this.land) {
+        mb.beginPath();
+        let started = false;
+        for (const pt of poly) {
+          const x = (pt.x * 360 - 180 - this.view.lng0) * k;
+          const y = (this.view.lat0 - (90 - pt.y * 180)) * k;
+          if (!started) { mb.moveTo(x, y); started = true; }
+          else mb.lineTo(x, y);
+        }
+        mb.closePath();
+        mb.fill();
+      }
+      const img = mb.getImageData(0, 0, mw, mh);
+      this.maskData = img.data;
+      this.maskCols = mw;
+      this.maskRows = mh;
+      this.maskReady = true;
     }
+  }
+
+  /** x/y 是否位于海洋（land mask 查询） */
+  isOcean(x: number, y: number): boolean {
+    if (!this.maskReady || !this.maskData) return true;
+    const c = Math.max(0, Math.min(this.maskCols - 1, (x / this.maskCell) | 0));
+    const r = Math.max(0, Math.min(this.maskRows - 1, (y / this.maskCell) | 0));
+    return this.maskData[(r * this.maskCols + c) * 4 + 3] < 128;
   }
 
   buildParticles() {
     this.rebuildField();
+    const lod = this.lodK();
     const dense = this.opts.dense ?? 1;
-    const target = Math.round(Math.min(3400, Math.max(650, (this.w * this.h) / 480)) * dense);
+    const target = Math.round(Math.min(3600, Math.max(420, (this.w * this.h) / 620)) * Math.pow(lod, 0.7) * dense);
     const dots = this.flowDots;
     if (dots.length > target) dots.length = target;
     else while (dots.length < target) dots.push(this.spawnDot());
+  }
+
+  /** 缩放感知 LOD：全局视图稀疏，放大后密度/尾迹/速度逐步提升 */
+  lodK(): number {
+    return clamp(this.view.scale / 3.6, 0.4, 2.4);
   }
 
   setPathSeason() { this.buildParticles(); }
@@ -634,7 +700,13 @@ class MapEngine {
         const dx = x2 - x1;
         const dy = y2 - y1;
         const len = Math.hypot(dx, dy) || 1;
-        segs.push({ x1, y1, x2, y2, tx: dx / len, ty: dy / len, span, strength, id, warm });
+        // 经度环绕：边缘线段在另一侧复制一份，粒子跨边时不穿出地图
+        const pushSeg = (ox: number) =>
+          segs.push({ x1: x1 + ox, y1, x2: x2 + ox, y2, tx: dx / len, ty: dy / len, span, strength, id, warm });
+        pushSeg(0);
+        const m = 130;
+        if (x1 < m || x2 < m) pushSeg(w);
+        if (x1 > w - m || x2 > w - m) pushSeg(-w);
       }
       acc += sp.total * (0.7 + span * 0.5);
       pool.push({ sp, warm, span, strength, id, cum: acc });
@@ -663,11 +735,11 @@ class MapEngine {
   }
 
   /** 采样某屏幕点的流场：归一化流向 + 冷暖占优色（高斯衰减，自然过渡到邻近洋流） */
-  pointField(x: number, y: number): { vx: number; vy: number; warm: boolean; ok: boolean; strength: number; cId: string } {
+  pointField(x: number, y: number): { vx: number; vy: number; warm: boolean; ok: boolean; strength: number; cId: string; weight: number } {
     const cell = this.fieldCell;
     const g = this.fieldGrid;
     const segs = this.fieldSegs;
-    if (!segs.length) return { vx: 0, vy: 0, warm: false, ok: false, strength: 1, cId: '' };
+    if (!segs.length) return { vx: 0, vy: 0, warm: false, ok: false, strength: 1, cId: '', weight: 0 };
     const R = 46;
     let vx = 0, vy = 0, wt = 0, warmW = 0, coldW = 0;
     let bestId = '', bestW = 0, bestSt = 1;
@@ -697,8 +769,8 @@ class MapEngine {
         }
       }
     }
-    if (wt < 0.015) return { vx: 0, vy: 0, warm: false, ok: false, strength: 1, cId: '' };
-    return { vx: vx / wt, vy: vy / wt, warm: warmW >= coldW, ok: true, strength: bestSt, cId: bestId };
+    if (wt < 0.015) return { vx: 0, vy: 0, warm: false, ok: false, strength: 1, cId: '', weight: 0 };
+    return { vx: vx / wt, vy: vy / wt, warm: warmW >= coldW, ok: true, strength: bestSt, cId: bestId, weight: Math.min(1.4, wt) };
   }
 
   /** 在任意洋流路径上随机取一个出生点（屏幕坐标 + 横向抖动，模拟流体扩散） */
@@ -717,9 +789,19 @@ class MapEngine {
     const [x, y] = this.proj(lng, lat);
     const ang = Math.random() * Math.PI * 2;
     const jr = Math.random() * 26;
+    let sx = x + Math.cos(ang) * jr;
+    let sy = y + Math.sin(ang) * jr;
+    // 出生点落在陆地上则重试，保证粒子从海洋出生
+    if (this.maskReady) {
+      for (let t = 0; t < 8; t++) {
+        if (this.isOcean(sx, sy)) break;
+        sx = x + Math.cos(ang + t * 0.9) * (jr * (t + 1));
+        sy = y + Math.sin(ang + t * 0.9) * (jr * (t + 1));
+      }
+    }
     return {
-      x: x + Math.cos(ang) * jr,
-      y: y + Math.sin(ang) * jr,
+      x: sx,
+      y: sy,
       age: Math.random() * 3,
       life: 4.5 + Math.random() * 5,
       len: 6 + Math.random() * 9,
@@ -742,7 +824,7 @@ class MapEngine {
         if (x === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
-      ctx.strokeStyle = 'rgba(255,255,255,' + (0.028 + k * 0.006) + ')';
+      ctx.strokeStyle = 'rgba(160,220,250,' + (0.02 + k * 0.005) + ')';
       ctx.lineWidth = 1;
       ctx.stroke();
     }
@@ -755,7 +837,7 @@ class MapEngine {
         if (x === 0) ctx.moveTo(x, y);
         else ctx.lineTo(x, y);
       }
-      ctx.strokeStyle = 'rgba(28, 78, 128,' + (0.02 + k * 0.008) + ')';
+      ctx.strokeStyle = 'rgba(70,150,210,' + (0.018 + k * 0.006) + ')';
       ctx.lineWidth = 1;
       ctx.stroke();
     }
@@ -763,24 +845,26 @@ class MapEngine {
     const px = ((t * 6.5) % (w + 600)) - 300;
     const py = ((h * 0.35 + t * 4.2) % (h + 400)) - 200;
     const rg = ctx.createRadialGradient(px, py, 0, px, py, 380);
-    rg.addColorStop(0, 'rgba(255,255,255,0.05)');
+    rg.addColorStop(0, 'rgba(140,220,255,0.04)');
     rg.addColorStop(1, 'rgba(255,255,255,0)');
     ctx.fillStyle = rg;
     ctx.fillRect(0, 0, w, h);
   }
 
-  /** Ventusky 式流场粒子：粒子沿矢量场运动，短线段尾部淡出，长短/速度/粗细各异 */
+  /** Ventusky 式流场粒子：柔和彗尾渲染（lighter 叠加），zoom-aware + ocean mask + 经度环绕 */
   drawFlowField(ctx: CanvasRenderingContext2D, w: number, h: number, speedMul: number, dt: number) {
     if (this.fieldCacheKey() !== this.fieldKey) this.rebuildField();
     if (this.opts.showArrows === false) return;
     const dense = this.opts.dense ?? 1;
-    const target = Math.round(Math.min(3400, Math.max(650, (w * h) / 480)) * dense);
+    const lod = this.lodK();
+    const target = Math.round(Math.min(3600, Math.max(420, (w * h) / 620)) * Math.pow(lod, 0.7) * dense);
     const dots = this.flowDots;
     if (dots.length > target) dots.length = target;
     else while (dots.length < target) dots.push(this.spawnDot());
 
-    const base = 42 * speedMul; // 参考流速 px/s
+    const base = 48 * speedMul * (0.65 + 0.65 * lod); // zoom 决定流速观感
     ctx.lineCap = 'round';
+    ctx.globalCompositeOperation = 'lighter';
     for (let i = 0; i < dots.length; i++) {
       const dot = dots[i];
       const f = this.pointField(dot.x, dot.y);
@@ -791,46 +875,56 @@ class MapEngine {
         const st = f.strength;
         dot.warm = f.warm;
         dot.cId = f.cId;
-        // 强洋流：更快、轨迹更长；弱洋流：更慢、轨迹更短
         const spd = base * st * (0.72 + (dot.seed % 97) / 210);
-        const effLen = dot.len * (0.7 + st * 0.45);
+        const effLen = dot.len * (0.6 + st * 0.4) * (0.55 + 0.45 * lod);
         const vx = f.vx * spd + perpX * wob * 7;
         const vy = f.vy * spd + perpY * wob * 7;
-        dot.x += vx * dt;
-        dot.y += vy * dt;
+        const nx = dot.x + vx * dt;
+        const ny = dot.y + vy * dt;
+        // 经度环绕：跨地图边缘时换到另一侧，不穿出地图
+        dot.x = nx > w + 40 ? nx - w : (nx < -40 ? nx + w : nx);
+        dot.y = ny;
+        // ocean mask：离开海洋立即重生
+        if (!this.isOcean(dot.x, dot.y)) {
+          dots[i] = this.spawnDot();
+          continue;
+        }
         const vlen = Math.hypot(vx, vy) || 1;
         const ux = vx / vlen;
         const uy = vy / vlen;
-        const tailX = dot.x - ux * effLen;
-        const tailY = dot.y - uy * effLen;
-        const midX = dot.x - ux * effLen * 0.5;
-        const midY = dot.y - uy * effLen * 0.5;
-        const fadeIn = Math.min(1, dot.age / 0.9);
-        const fadeOut = Math.min(1, (dot.life - dot.age) / 1.4);
+        const fadeIn = Math.min(1, dot.age / 1.0);
+        const fadeOut = Math.min(1, (dot.life - dot.age) / 2.4);
         let fade = Math.max(0, Math.min(fadeIn, fadeOut));
-        // 聚焦选中洋流时，其他洋流粒子淡出（教学对比）
-        if (this.opts.dimUnselected && this.opts.selectedId && f.cId !== this.opts.selectedId) fade *= 0.2;
-        if (fade > 0.01) {
-          ctx.strokeStyle = dot.warm ? T_WARM : T_COLD;
-          ctx.lineWidth = dot.width;
-          ctx.globalAlpha = 0.2 * fade;
+        if (this.opts.dimUnselected && this.opts.selectedId && f.cId !== this.opts.selectedId) fade *= 0.16;
+        // 边缘渐隐：离开流场核心越远越透明（密度/透明度梯度）
+        fade *= 0.28 + 0.72 * Math.min(1, f.weight);
+        if (fade <= 0.02) continue;
+        const col = dot.warm ? T_WARM : T_COLD;
+        ctx.strokeStyle = col;
+        ctx.lineWidth = dot.width * clamp(lod * 0.85, 0.6, 1.7);
+        // 柔和彗尾：4 段渐次淡出的短尾叠加 → 流动感而非独立短线
+        for (let s = 1; s <= 4; s++) {
+          const t1 = s / 4;
+          const t0 = (s - 1) / 4;
+          ctx.globalAlpha = fade * (0.028 + 0.1 * t1);
           ctx.beginPath();
-          ctx.moveTo(tailX, tailY);
-          ctx.lineTo(midX, midY);
-          ctx.stroke();
-          ctx.globalAlpha = 0.78 * fade;
-          ctx.beginPath();
-          ctx.moveTo(midX, midY);
-          ctx.lineTo(dot.x, dot.y);
+          ctx.moveTo(dot.x - ux * effLen * t0, dot.y - uy * effLen * t0);
+          ctx.lineTo(dot.x - ux * effLen * t1, dot.y - uy * effLen * t1);
           ctx.stroke();
         }
+        // 头部一个柔亮小点，让流向可读
+        ctx.globalAlpha = fade * 0.15;
+        ctx.beginPath();
+        ctx.arc(dot.x, dot.y, dot.width * 0.85, 0, Math.PI * 2);
+        ctx.fill();
       }
       dot.age += dt * (f.ok ? 1 : 3.5);
-      if (dot.age > dot.life || dot.x < -90 || dot.x > w + 90 || dot.y < -90 || dot.y > h + 90) {
+      if (dot.age > dot.life || dot.x < -120 || dot.x > w + 120 || dot.y < -120 || dot.y > h + 120) {
         dots[i] = this.spawnDot();
       }
     }
     ctx.globalAlpha = 1;
+    ctx.globalCompositeOperation = 'source-over';
     ctx.lineCap = 'butt';
   }
 
@@ -949,10 +1043,16 @@ class MapEngine {
   drawLabels(ctx: CanvasRenderingContext2D, w: number, h: number) {
     const season = this.opts.season ?? 'summer';
     const ids = this.opts.currentIds?.length ? this.opts.currentIds : CURRENTS.map((c) => c.id);
+    const lod = this.lodK();
+    const subset = !!this.opts.currentIds?.length; // 子图（档案馆/实验）保留全部标签
     for (const id of ids) {
       const c = CURRENT_MAP[id];
       if (!c) continue;
-      if (this.opts.labelsOnlySelected && c.id !== this.opts.selectedId) continue;
+      const active = this.opts.selectedId === c.id;
+      const major = MAJOR_IDS.has(id);
+      // 全球页默认只显示主要洋流；放大后其余洋流逐步出现；选中/交互总是显示
+      if (!active && !major && !subset && lod < 1.9) continue;
+      if (this.opts.labelsOnlySelected && !active) continue;
       const p = pathOf(c, season);
       const anchor = p[Math.floor(p.length * 0.5)];
       const [x, y] = this.proj(anchor[0], anchor[1]);
@@ -960,16 +1060,15 @@ class MapEngine {
       const scaleK = clamp(this.view.scale / 4, 0.75, 1.5);
       const fs = 11.5 * scaleK;
       const col = typeColor(seasonalType(c, season));
-      const active = this.opts.selectedId === c.id;
       const dimmed = this.opts.dimUnselected && this.opts.selectedId && c.id !== this.opts.selectedId;
-      if (dimmed) continue;
-      ctx.font = `600 ${fs}px "PingFang SC", sans-serif`;
+      const alpha = active ? 1 : (dimmed ? 0.3 : 0.82);
+      ctx.font = '600 ' + fs + 'px "PingFang SC", sans-serif';
       const name = c.nameZh + (c.seasonal ? (season === 'summer' ? '（夏）' : '（冬）') : '');
       const tw = ctx.measureText(name).width;
       const padX = 7;
       const bh = fs + 8;
-      ctx.globalAlpha = active ? 1 : 0.82;
-      ctx.fillStyle = 'rgba(3, 11, 22, 0.72)';
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = 'rgba(2, 8, 16, 0.62)';
       ctx.beginPath();
       ctx.roundRect(x - tw / 2 - padX, y - bh / 2, tw + padX * 2, bh, 6);
       ctx.fill();
@@ -981,10 +1080,10 @@ class MapEngine {
       ctx.fillStyle = col;
       ctx.fillText(name, x - tw / 2, y + fs * 0.34);
       ctx.globalAlpha = 1;
-      // 英文小字
-      if (this.view.scale > 3.2 && !active) {
-        ctx.font = `500 ${fs * 0.62}px sans-serif`;
-        ctx.fillStyle = 'rgba(150, 185, 220, 0.55)';
+      // 英文小字（主要/选中/子图或放大时）
+      if (this.view.scale > 3.2 && !active && (major || subset || lod >= 1.9)) {
+        ctx.font = '500 ' + (fs * 0.62) + 'px sans-serif';
+        ctx.fillStyle = 'rgba(140, 180, 215, 0.5)';
         ctx.fillText(c.nameEn.slice(0, 26), x - tw / 2, y + bh / 2 + fs * 0.62);
       }
     }
