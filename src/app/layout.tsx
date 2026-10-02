@@ -19,6 +19,8 @@ export const viewport: Viewport = {
 export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="zh-CN">
+      {/* suppressHydrationWarning：忽略浏览器扩展注入的属性（如 data-atm-ext-installed）
+          导致的 hydration 差异，仅影响该元素属性，不影响功能与安全检查 */}
       <body className="grain" style={{ position: 'relative' }}>
         <div aria-hidden style={{
           position: 'fixed', inset: 0, zIndex: -2, pointerEvents: 'none',
