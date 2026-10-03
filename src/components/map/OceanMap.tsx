@@ -6,7 +6,6 @@ import { CURRENTS, CURRENT_MAP, pathOf, typeColor, seasonalType } from '@/data/c
 import { project, unproject, samplePath, distToPath, pointAt, bboxOf, clamp, type SampledPath, type Pt } from '@/lib/geo';
 import { pseudoNoise } from '@/lib/noise';
 import type { OceanCurrent, Season } from '@/types';
-import type { WindVec } from '@/lib/wind';
 
 const T_WARM = '#f09a55'; // 柔琥珀暖橙
 const T_COLD = '#62c6ef'; // 冰蓝青
@@ -64,12 +63,6 @@ export interface OceanMapProps {
   onHover?: (id: string | null) => void;
   onTrackerMove?: (info: { lng: number; lat: number; currentId: string | null }) => void;
   region?: { center: [number, number]; zoom?: number };
-  /** Ventusky 式风粒子场：按经纬度返回风向/强度（null = 无风区） */
-  windField?: (lng: number, lat: number) => WindVec | null;
-  /** 风粒子强度倍率（“风速”滑杆联动） */
-  windScale?: number;
-  /** 索马里沿岸上升流视觉（夏季冷蓝水带+上升粒子+光晕，冬季停止） */
-  upwelling?: boolean;
   className?: string;
   style?: React.CSSProperties;
   dimUnselected?: boolean;
@@ -96,22 +89,6 @@ interface FlowDot {
   seed: number;
 }
 
-interface WindDot {
-  x: number;
-  y: number;
-  age: number;
-  life: number;
-  len: number;
-  seed: number;
-  /** 少数粒子带一个很小的箭头尖，提示流向 */
-  arrow: boolean;
-}
-
-interface UpwellDot {
-  age: number;
-  life: number;
-  seed: number;
-}
 
 interface FlowSegment {
   x1: number; y1: number;
@@ -188,8 +165,6 @@ class MapEngine {
   zoomedOutSnap = false;
   animT = 0;
   flowDots: FlowDot[] = [];
-  windDots: WindDot[] = [];
-  upwellDots: UpwellDot[] = [];
   fieldSegs: FlowSegment[] = [];
   fieldGrid = new Map<number, number[]>();
   fieldCell = 56;
@@ -608,9 +583,7 @@ class MapEngine {
     // 背景层的轻微水面流动感（低振幅动态纹理）
     this.drawWaterTexture(ctx, w, h);
 
-    this.drawUpwelling(ctx, w, h, dt);
     this.drawWindBelts(ctx, w, h, season);
-    this.drawWindField(ctx, w, h, dt);
 
     // Ventusky 式粒子流场：大量短促半透明流线粒子沿矢量场运动
     this.drawFlowField(ctx, w, h, speedMul, dt);
@@ -1136,192 +1109,6 @@ class MapEngine {
       ctx.fillText(label, x + len, y - 4);
     }
   }
-
-  /** Ventusky 式短流线风粒子场：大量短小线段沿风向流动，长度/透明度各异，少量带微型箭头尖 */
-  drawWindField(ctx: CanvasRenderingContext2D, w: number, h: number, dt: number) {
-    const wf = this.opts.windField;
-    if (!wf) return;
-    const dense = this.opts.dense ?? 1;
-    const lod = this.lodK();
-    const target = Math.round(Math.min(2000, Math.max(220, (w * h) / 620)) * Math.pow(lod, 0.45) * dense);
-    const dots = this.windDots;
-    if (dots.length > target) dots.length = target;
-    else while (dots.length < target) dots.push(this.spawnWindDot());
-    const scale = this.opts.windScale ?? 1;
-    ctx.lineCap = 'round';
-    ctx.globalCompositeOperation = 'lighter';
-    const base = 58 * scale * (0.75 + 0.5 * lod);
-    for (let i = 0; i < dots.length; i++) {
-      const dot = dots[i];
-      dot.age += dt;
-      if (dot.age > dot.life) { dots[i] = this.spawnWindDot(); continue; }
-      const [lng, lat] = this.screenToLngLat(dot.x, dot.y);
-      const v = wf(lng, lat);
-      if (!v || v.strength < 0.05) { dots[i] = this.spawnWindDot(); continue; }
-      // 世界方向 → 屏幕方向（y 翻转），加轻微自然扰动，形成“空气在流动”感
-      const dir0 = Math.atan2(v.dy, v.dx);
-      const wob = pseudoNoise(dot.x * 0.014 + this.time * 0.43, dot.seed) * 0.22;
-      const dir = dir0 + wob;
-      const spd = base * Math.min(1.25, v.strength) * (0.72 + (dot.seed % 89) / 220);
-      const ux = Math.cos(dir), uy = -Math.sin(dir);
-      dot.x += ux * spd * dt;
-      dot.y += uy * spd * dt;
-      // 横向环绕；纵向出界 / 落陆重生
-      if (dot.x > w + 60) dot.x -= w; else if (dot.x < -60) dot.x += w;
-      if (dot.y < -80 || dot.y > h + 80 || !this.isOcean(dot.x, dot.y)) {
-        dots[i] = this.spawnWindDot();
-        continue;
-      }
-      const fadeIn = Math.min(1, dot.age / 1.1);
-      const fadeOut = Math.min(1, (dot.life - dot.age) / 1.8);
-      const fade = Math.max(0, Math.min(fadeIn, fadeOut));
-      const len = dot.len * (0.55 + 0.8 * Math.min(1.25, v.strength)) * (0.62 + 0.42 * lod);
-      const alpha = fade * (0.30 + 0.34 * ((dot.seed % 47) / 47));
-      // 4 段渐隐短尾 → 流动方向清晰、长度不一、部分淡出
-      for (let sgi = 1; sgi <= 4; sgi++) {
-        const t1 = sgi / 4;
-        const t0 = (sgi - 1) / 4;
-        ctx.strokeStyle = 'rgba(178, 228, 255, 1)';
-        ctx.globalAlpha = alpha * (0.16 + 0.24 * t1);
-        ctx.lineWidth = 1.05 * clamp(lod, 0.7, 1.5);
-        ctx.beginPath();
-        ctx.moveTo(dot.x - ux * len * t0, dot.y - uy * len * t0);
-        ctx.lineTo(dot.x - ux * len * t1, dot.y - uy * len * t1);
-        ctx.stroke();
-      }
-      // 头部柔亮小点，让流动方向可读
-      ctx.globalAlpha = alpha * 0.5;
-      ctx.fillStyle = 'rgba(205, 238, 255, 1)';
-      ctx.beginPath();
-      ctx.arc(dot.x, dot.y, 0.9, 0, Math.PI * 2);
-      ctx.fill();
-      // 约 10% 粒子带一个很小的箭头尖（只提示方向，不再用大风向箭头）
-      if (dot.arrow) {
-        const ah = 3.4, aw = 1.6;
-        const tx = dot.x + ux * ah, ty = dot.y + uy * ah;
-        const bx = dot.x + ux * ah * 0.3, by = dot.y + uy * ah * 0.3;
-        const px = -uy, py = ux;
-        ctx.globalAlpha = alpha * 0.8;
-        ctx.fillStyle = 'rgba(226, 246, 255, 1)';
-        ctx.beginPath();
-        ctx.moveTo(tx, ty);
-        ctx.lineTo(bx + px * aw, by + py * aw);
-        ctx.lineTo(bx - px * aw, by - py * aw);
-        ctx.closePath();
-        ctx.fill();
-      }
-    }
-    ctx.globalAlpha = 1;
-    ctx.globalCompositeOperation = 'source-over';
-    ctx.lineCap = 'butt';
-  }
-
-  spawnWindDot(): WindDot {
-    let x = Math.random() * this.w;
-    let y = Math.random() * this.h;
-    if (this.maskReady) {
-      for (let t = 0; t < 10; t++) {
-        if (this.isOcean(x, y)) break;
-        x = Math.random() * this.w;
-        y = Math.random() * this.h;
-      }
-    }
-    return {
-      x, y,
-      age: Math.random() * 2,
-      life: 5 + Math.random() * 4.5,
-      len: 7 + Math.random() * 10,
-      seed: Math.random() * 100,
-      arrow: Math.random() < 0.1,
-    };
-  }
-
-  /** 索马里沿岸上升流视觉：夏季冷蓝水带 + 上升粒子 + 光晕；冬季停止（弱暖调提示） */
-  drawUpwelling(ctx: CanvasRenderingContext2D, w: number, h: number, dt: number) {
-    if (!this.opts.upwelling) return;
-    const season = this.opts.season ?? 'summer';
-    const coast: [number, number][] = [
-      [50.5, -3], [48.8, 0.5], [47.5, 4], [46.2, 7.5], [44.8, 10.5], [43.5, 12.5],
-    ];
-    const pts = coast.map(([lng, lat]) => this.proj(lng, lat));
-    if (pts.every(([x, y]) => x < -80 || x > w + 80 || y < -80 || y > h + 80)) return;
-    const lod = this.lodK();
-    const bandW = 22 * lod;
-    const summer = season === 'summer';
-    ctx.save();
-    ctx.globalCompositeOperation = 'lighter';
-    if (summer) {
-      // 冷蓝水带：三层叠加 + 光晕，模拟沿岸冷水上涌形成的寒流带
-      const pulse = 0.75 + 0.25 * Math.sin(this.time * 1.7);
-      for (let layer = 0; layer < 3; layer++) {
-        ctx.strokeStyle = `rgba(94, 208, 255, ${(0.16 - layer * 0.045) * pulse})`;
-        ctx.lineWidth = bandW * (1.6 + layer * 1.4);
-        ctx.shadowColor = 'rgba(88, 200, 255, 0.55)';
-        ctx.shadowBlur = 18 + layer * 12;
-        ctx.beginPath();
-        pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-        ctx.stroke();
-      }
-      ctx.shadowBlur = 0;
-      // 上升粒子：沿岸“深层冷水上涌”的微团，向北漂移、渐隐
-      const N = 42;
-      if (this.upwellDots.length > N) this.upwellDots.length = N;
-      while (this.upwellDots.length < N) this.upwellDots.push(this.spawnUpwellDot());
-      for (let i = 0; i < this.upwellDots.length; i++) {
-        const d = this.upwellDots[i];
-        d.age += dt;
-        if (d.age > d.life) { this.upwellDots[i] = this.spawnUpwellDot(); continue; }
-        const s = d.age / d.life;
-        const t0 = (d.seed % 100) / 100;
-        const idx = t0 * (coast.length - 1);
-        const i0 = Math.min(coast.length - 2, Math.floor(idx));
-        const f = idx - i0;
-        const lng = coast[i0][0] + (coast[i0 + 1][0] - coast[i0][0]) * f + s * 0.35;
-        const lat = coast[i0][1] + (coast[i0 + 1][1] - coast[i0][1]) * f + s * 0.9;
-        const [x, y] = this.proj(lng, lat);
-        if (x < -40 || x > w + 40 || y < -40 || y > h + 40) continue;
-        const fadeIn = Math.min(1, d.age / 0.9);
-        const fadeOut = Math.min(1, (d.life - d.age) / 1.3);
-        const fade = fadeIn * fadeOut * (0.4 + 0.4 * ((d.seed % 13) / 13));
-        ctx.globalAlpha = fade * 0.6;
-        ctx.fillStyle = 'rgba(150, 226, 255, 1)';
-        ctx.shadowColor = 'rgba(120, 215, 255, 0.8)';
-        ctx.shadowBlur = 6;
-        ctx.beginPath();
-        ctx.arc(x, y, 1.1 + 0.7 * Math.sin(this.time * 3 + d.seed), 0, Math.PI * 2);
-        ctx.fill();
-        ctx.globalAlpha = fade * 0.28;
-        ctx.strokeStyle = 'rgba(170, 232, 255, 1)';
-        ctx.lineWidth = 1;
-        ctx.beginPath();
-        ctx.moveTo(x, y + 5);
-        ctx.lineTo(x, y);
-        ctx.stroke();
-      }
-      ctx.shadowBlur = 0;
-    } else {
-      // 冬季：上升流停止，沿岸转为微弱的暖色调提示（不再是寒流带）
-      ctx.strokeStyle = 'rgba(255, 176, 110, 0.10)';
-      ctx.lineWidth = bandW * 1.8;
-      ctx.shadowColor = 'rgba(255, 170, 100, 0.25)';
-      ctx.shadowBlur = 16;
-      ctx.beginPath();
-      pts.forEach(([x, y], i) => (i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y)));
-      ctx.stroke();
-      ctx.shadowBlur = 0;
-    }
-    ctx.restore();
-    ctx.globalAlpha = 1;
-  }
-
-  spawnUpwellDot(): UpwellDot {
-    return {
-      age: Math.random() * 2,
-      life: 2.8 + Math.random() * 3,
-      seed: Math.random() * 100,
-    };
-  }
-
 
   drawLabels(ctx: CanvasRenderingContext2D, w: number, h: number) {
     const season = this.opts.season ?? 'summer';

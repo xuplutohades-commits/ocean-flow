@@ -1,12 +1,11 @@
 'use client';
 import { asset } from '@/lib/asset';
-import { useEffect, useMemo, useRef, useState } from 'react';
-import { OceanMap, type OceanMapHandle } from '@/components/map/OceanMap';
+import { useEffect, useMemo, useState } from 'react';
+import MonsoonMap from '@/components/map/MonsoonMap';
 import WalkerCanvas, { type EnsoState } from '@/components/atmosphere/WalkerCanvas';
 import ThreeCellDiagram from '@/components/atmosphere/ThreeCellDiagram';
 import { Panel, Slider, Seg, Reveal } from '@/components/ui/kit';
 import { useApp } from '@/store/app';
-import { monsoonWind } from '@/lib/wind';
 import type { Season } from '@/types';
 
 const ENSO_PRESETS = [
@@ -58,10 +57,8 @@ export default function AtmospherePage() {
   const { season, setSeason, } = useApp();
   const [anomaly, setAnomaly] = useState(0);
   const [tradeWind, setTradeWind] = useState(70);
-  const mapRef = useRef<OceanMapHandle>(null);
 
   const enso: EnsoState = useMemo(() => ({ anomaly, tradeWind }), [anomaly, tradeWind]);
-  const windField = useMemo(() => (lng: number, lat: number) => monsoonWind(lng, lat, season), [season]);
 
   const reversed = anomaly > 1.2;
   const upwell = reversed ? 6 : Math.round(tradeWind * 0.95);
@@ -127,31 +124,24 @@ export default function AtmospherePage() {
         </Reveal>
         <div className="mt-5 grid lg:grid-cols-[1fr_360px] gap-4">
           <div className="rounded-[16px] overflow-hidden border border-[rgba(126,190,255,0.16)] relative" style={{ minHeight: 460 }}>
-            <OceanMap
-              ref={mapRef}
-              region={{ center: [72, 12], zoom: 3.4 }}
+            <MonsoonMap
               season={season}
-              windField={windField}
-              upwelling
-              showLabels
-              dense={1.1}
-              interactive
-              currentIds={['monsoonSummer', 'somaliSummer', 'indSouthEq', 'westAustralia', 'agulhas']}
-              onSelect={() => {}}
+              className="w-full h-full"
+              style={{ minHeight: 460 }}
             />
             <div className="absolute top-3 left-3 flex items-center gap-2 pointer-events-none">
-              <span className="badge" style={{ background: 'rgba(4,14,28,0.78)' }}>盛行风（短流线粒子）随季节转向</span>
+              <span className="badge" style={{ background: 'rgba(4,14,28,0.78)' }}>北印度洋：季风 → 洋流 → 上升流</span>
               {season === 'summer' ? (
                 <span className="badge badge-cold" style={{ background: 'rgba(4,14,28,0.78)' }}>索马里寒流（上升流·冷蓝水带）</span>
               ) : (
-                <span className="badge badge-warm" style={{ background: 'rgba(4,14,28,0.78)' }}>索马里暖流（上升流停止）</span>
+                <span className="badge badge-warm" style={{ background: 'rgba(4,14,28,0.78)' }}>索马里暖流（上升流消失）</span>
               )}
             </div>
             <div className="absolute bottom-3 left-3 pointer-events-auto">
               <Seg<Season>
                 options={[{ id: 'summer', label: '夏季（西南季风）' }, { id: 'winter', label: '冬季（东北季风）' }]}
                 value={season}
-                onChange={(v) => { setSeason(v); mapRef.current?.setView({ center: [72, 12], zoom: 3.4 }); }}
+                onChange={setSeason}
               />
             </div>
           </div>
