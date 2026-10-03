@@ -123,14 +123,14 @@ export default function AtmospherePage() {
           <p className="mt-2 text-[13px] text-[#8ba7c6] max-w-3xl">切换夏季 / 冬季：风向、洋流方向、索马里沿岸寒暖全部反转——北印度洋是全球唯一冬夏流向相反的大洋。</p>
         </Reveal>
         <div className="mt-5 grid lg:grid-cols-[1fr_360px] gap-4">
-          <div className="rounded-[16px] overflow-hidden border border-[rgba(126,190,255,0.16)] relative" style={{ minHeight: 460 }}>
+          <div className="rounded-[16px] overflow-hidden border border-[rgba(126,190,255,0.16)] relative h-[480px] md:h-[540px] lg:h-[560px]">
             <MonsoonMap
               season={season}
               className="w-full h-full"
               style={{ minHeight: 460 }}
             />
             <div className="absolute top-3 left-3 flex items-center gap-2 pointer-events-none">
-              <span className="badge" style={{ background: 'rgba(4,14,28,0.78)' }}>北印度洋：季风 → 洋流 → 上升流</span>
+              <span className="badge" style={{ background: 'rgba(4,14,28,0.78)' }}>动态因果演示：风 → 海水 → 洋流 → 上升流</span>
               {season === 'summer' ? (
                 <span className="badge badge-cold" style={{ background: 'rgba(4,14,28,0.78)' }}>索马里寒流（上升流·冷蓝水带）</span>
               ) : (
@@ -147,18 +147,43 @@ export default function AtmospherePage() {
           </div>
           <div className="space-y-4">
             <Panel className="p-5">
-              <div className="kicker text-[10px]">LAND–SEA THERMAL CONTRAST · 海陆热力差异</div>
+              <div className="kicker text-[10px]">WHY DOES MONSOON FLIP · 季风为什么会反转</div>
               <div className="mt-3"><MonsoonSchematic season={season} /></div>
-              <p className="text-[12px] leading-relaxed text-[#8ba7c6] mt-3">
-                冬夏海陆气压场相反 → 季风风向相反 → 表层洋流整体转向。这是“气压梯度力 + 地转偏向力 + 摩擦力”在区域尺度上的教科书级应用。
+              <div className="mt-3 space-y-2 text-[12px] leading-relaxed text-[#a9c3de]">
+                {season === 'summer' ? (
+                  <>
+                    <div><b className="text-[#ffd9ae]">① 大陆受热</b> → 亚欧大陆升温快，形成热低压（G）</div>
+                    <div><b className="text-[#ffd9ae]">②</b> 海洋升温慢 → 相对高压，风从海洋吹向大陆</div>
+                    <div><b className="text-[#ffd9ae]">③ 西南季风</b> → 表层海水被推向东北，环流顺时针</div>
+                  </>
+                ) : (
+                  <>
+                    <div><b className="text-[#bde6ff]">① 大陆冷却</b> → 亚欧大陆降温快，形成冷高压（H）</div>
+                    <div><b className="text-[#bde6ff]">②</b> 海洋降温慢 → 相对低压，风从大陆吹向海洋</div>
+                    <div><b className="text-[#bde6ff]">③ 东北季风</b> → 表层海水被推向西南，环流逆时针</div>
+                  </>
+                )}
+              </div>
+              <p className="text-[11.5px] leading-relaxed text-[#6f8aa7] mt-3">
+                冬夏海陆气压场相反 → 季风风向相反 → 表层洋流整体转向。这是“气压梯度力 + 地转偏向力”在区域尺度上的教科书级应用。
               </p>
             </Panel>
             <Panel className="p-5">
-              <div className="kicker text-[10px]">为什么索马里沿岸会“夏寒冬暖”</div>
-              <p className="text-[12.5px] leading-relaxed text-[#a9c3de] mt-2">
-                夏季西南风沿索马里半岛吹的是<b className="text-[#ffd9ae]">离岸风</b>：表层海水被吹离海岸，深层冷水上涌，沿岸水温骤降并带来营养盐——渔场在夏天“开工”。
-                冬季东北风转为向岸风，上升流停止，水温回升。
-              </p>
+              <div className="kicker text-[10px]">WHY UPWELLING · 索马里沿岸为什么有上升流</div>
+              {season === 'summer' ? (
+                <div className="mt-2 space-y-2 text-[12px] leading-relaxed text-[#a9c3de]">
+                  <div><b className="text-[#7fd4ff]">① 西南季风沿岸吹拂</b>：风从海面吹向东北，把表层海水推离海岸</div>
+                  <div><b className="text-[#7fd4ff]">② 离岸输运</b>：沿岸表层海水被带走，海面微微“缺位”</div>
+                  <div><b className="text-[#7fd4ff]">③ 深层冷水上涌</b>：下层冷海水沿岸上升补位（图中沿岸蓝色低温区）</div>
+                  <div><b className="text-[#7fd4ff]">④ 沿岸降温</b>：索马里沿岸夏季反而出现寒流，营养盐丰富 → 渔场“开工”</div>
+                </div>
+              ) : (
+                <div className="mt-2 space-y-2 text-[12px] leading-relaxed text-[#a9c3de]">
+                  <div><b className="text-[#bde6ff]">① 东北季风</b>：风从大陆吹向海面，转为<b>向岸风</b></div>
+                  <div><b className="text-[#bde6ff]">② 向岸输运</b>：海水被推向岸边，不再缺位</div>
+                  <div><b className="text-[#bde6ff]">③ 上升流停止</b>：冷水上涌消失，沿岸水温回升（暖流）</div>
+                </div>
+              )}
               <div className="mt-3 text-[11px] text-[#5f7b99]">关联影像：“阿拉伯海红色浮游生物”即夏季季风上升流的卫星证据（见洋流档案馆）。</div>
             </Panel>
           </div>
