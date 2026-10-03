@@ -114,7 +114,7 @@ export default function AtmospherePage() {
             <a key={h} href={h} className="badge badge-accent hover:brightness-125">{l}</a>
           ))}
         </div>
-        <div id="winds" className="grid lg:grid-cols-[400px_1fr] gap-4 items-stretch">
+        <div id="winds" className="grid lg:grid-cols-[340px_1fr] gap-4 items-stretch">
           <Panel className="p-5">
             <div className="kicker text-[10px]">GLOBAL CIRCULATION · 三圈环流</div>
             <h3 className="text-[16px] font-bold mt-2 text-[#eaf6ff]">风从哪里来</h3>
@@ -122,28 +122,18 @@ export default function AtmospherePage() {
               赤道受热最强，空气上升 → 高空流向两极 → 30° 附近下沉（副热带高压）→ 低空流回赤道。
               地转偏向力使低空气流偏转，于是地面形成信风带、西风带与极地东风带——<b className="text-[#d9fffd]">风带就是洋流的第一推动力</b>。
             </p>
-            <div className="mt-4 rounded-[12px] overflow-hidden" style={{ border: '1px solid rgba(126,190,255,0.14)' }}>
-              <ThreeCellDiagram />
-            </div>
             <div className="mt-3 space-y-1.5 text-[12px] text-[#8ba7c6]">
-              <div>· 北半球信风为东北信风，南半球为东南信风</div>
+              <div>· 赤道受热上升 → 高空向两极 → 30° 副热带高压下沉 → 低空回流（哈德莱环流）</div>
+              <div>· 北半球信风为东北信风，南半球为东南信风——“偏转”就是地转偏向力</div>
               <div>· 中纬盛行西风——西风漂流的“发动机”</div>
               <div>· 极地东风驱动南极沿岸环流</div>
             </div>
           </Panel>
 
-          <div className="rounded-[16px] overflow-hidden border border-[rgba(126,190,255,0.16)] relative" style={{ minHeight: 480 }}>
-            <OceanMap
-              ref={mapRef}
-              showWindBelts
-              showLabels
-              dense={0.9}
-              interactive
-              currentIds={['pacNorthEq', 'pacSouthEq', 'kuroshio', 'northPacCurrent', 'californiaCurrent', 'westWindS', 'antarcticCirc', 'gulfStream', 'northAtlanticCurrent', 'canaryCurrent', 'atlNorthEq', 'atlSouthEq', 'brazilCurrent', 'benguelaCurrent', 'indSouthEq', 'agulhas', 'westAustralia', 'monsoonSummer', 'somaliSummer']}
-              onSelect={() => {}}
-            />
+          <div className="rounded-[16px] overflow-hidden border border-[rgba(126,190,255,0.16)] relative flex items-center" style={{ minHeight: 480 }}>
+            <ThreeCellDiagram />
             <div className="absolute top-3 left-3 pointer-events-none">
-              <span className="badge" style={{ background: 'rgba(4,14,28,0.78)' }}>风带 + 风海流：信风与西风如何推动大环流</span>
+              <span className="badge" style={{ background: 'rgba(4,14,28,0.78)' }}>三圈环流剖面：赤道上升 → 30° 下沉 → 低空回流，地转偏转 → 三个风带</span>
             </div>
           </div>
         </div>
