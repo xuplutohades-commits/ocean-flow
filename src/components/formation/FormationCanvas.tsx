@@ -279,9 +279,10 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
           const screenAng = Math.atan2(-wv.dy, wv.dx); // 地理(dx,dy) → 画布角(y 向下)
           const dxs = Math.cos(screenAng);
           const dys = Math.sin(screenAng);
-          const spacing = 52;
-          const phase = (((time * (13 + 16 * spd) + b.min * 3 + (hem > 0 ? 0 : 30)) % spacing) + spacing) % spacing;
+          // 每个箭头围绕自己的位置沿风向平滑往复摆动，相位随经度错开——
+          // 不再“整排同步滑行后跳回起点”，彻底消除成条闪烁
           for (let lng = -172; lng <= 172; lng += 46) {
+            const phase = Math.sin(time * 2.2 + lng * 0.35 + b.min * 1.7 + hem * 2) * 11;
             const cx = (lng + 180) * view.scaleX + dxs * phase;
             const cy = (90 - mid) * view.scaleY + dys * phase;
             ctx.save();
@@ -490,7 +491,12 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
         const x = (p.lng + 180) * view.scaleX;
         const y = (90 - p.lat) * view.scaleY;
         const wob = pseudoNoise(time * 0.8 + p.seed, 3) * 0.9;
-        p.trail.push({ x: x + wob, y: y + wob * 0.4 });
+        const pt = { x: x + wob, y: y + wob * 0.4 };
+        // 跨日期变更线时 x 从画布一端跳到另一端——此时断开拖尾，
+        // 避免拖尾连线画出“贯穿全屏、闪一两帧就消失”的横线
+        const lastPt = p.trail[p.trail.length - 1];
+        if (lastPt && Math.abs(pt.x - lastPt.x) > w * 0.45) p.trail.length = 0;
+        p.trail.push(pt);
         if (p.trail.length > 4) p.trail.shift();
         const t = Math.min(sp / maxV, 1);
         // 蓝→琥珀渐变表示速度
