@@ -182,7 +182,7 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
         bc.moveTo(0, y); bc.lineTo(w, y);
       }
       bc.stroke();
-      bc.strokeStyle = 'rgba(111,227,224,0.14)';
+      bc.strokeStyle = 'rgba(111,227,224,0.09)';
       bc.beginPath();
       const yE = (90 - 0) * view.scaleY;
       bc.moveTo(0, yE); bc.lineTo(w, yE);
@@ -275,7 +275,7 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
             ctx.save();
             ctx.translate(cx, cy);
             ctx.rotate(screenAng);
-            ctx.globalAlpha = (windOn ? 0.8 : 0.42) * (0.78 + 0.22 * Math.sin(time * 2.4 + b.min * 1.7 + hem * 2 + lng * 0.3));
+            ctx.globalAlpha = windOn ? 0.72 : 0.4;
             ctx.strokeStyle = 'rgba(178,228,255,1)';
             ctx.lineWidth = 1.35;
             ctx.beginPath();
@@ -342,14 +342,26 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
             p.vx += p.vy * dir * cs * corK * dt;
             p.vy += -p.vx * dir * cs * corK * dt;
           }
-          // 副热带辐合带:18–42° 间弱回流把表层水轻轻“收拢”到 ~±27°
-          // (真实海洋副热带辐合区), 与风带共同维持中纬度海水的循环
+          // 副热带辐合带:18–42° 间弱回流把表层水轻轻“收拢”，中心随经度蛇形摆动
+          // (真实副热带辐合区本就不成直线)，避免在屏幕上聚出一道刺眼的纬向直线
           {
             const aLat = Math.abs(p.lat);
             if (aLat > 12 && aLat < 45) {
-              const off = 26 - aLat; // 正=在赤道侧, 负=在极地侧
-              const pull = off * 0.003 * Math.exp(-((aLat - 26) * (aLat - 26)) / 170);
-              p.vy += Math.sign(p.lat) * clamp(pull, -0.09, 0.09) * dt * 30;
+              const c26 = 26 + 4.6 * Math.sin(p.lng * 0.45 + p.seed * 2.4);
+              const off = c26 - aLat; // 正=在赤道侧, 负=在极地侧
+              const pull = off * 0.0015 * Math.exp(-((aLat - 26) * (aLat - 26)) / 200);
+              p.vy += Math.sign(p.lat) * clamp(pull, -0.06, 0.06) * dt * 30;
+            }
+          }
+          // 赤道流 / 极锋流的轴线也随经度轻摆（每颗粒子相位略不同 → 形成一条 ±2° 的
+          // 流动带而非笔直线）；真实赤道流与绕极流本来就有波状摆动
+          {
+            const aLat = Math.abs(p.lat);
+            if (st.surfaceWind && (aLat < 9 || (aLat > 54 && aLat < 70))) {
+              const weave = aLat < 9
+                ? 2.3 * Math.sin(p.lng * 0.42 + p.seed * 2.8)
+                : Math.sign(p.lat) * (61 + 2.8 * Math.sin(p.lng * 0.5 + p.seed * 2.8 + (p.lat > 0 ? 1.2 : -2.3)));
+              p.vy += clamp((weave - p.lat) * 0.022, -0.045, 0.045) * dt * 30;
             }
           }
           const sp = Math.hypot(p.vx, p.vy);
@@ -410,12 +422,12 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
           const aLat = Math.abs(p.lat);
           const inBand = aLat < 5 || (aLat > 56 && aLat < 68);
           p.bandT = inBand ? p.bandT + dt : Math.max(0, p.bandT - dt * 0.8);
-          p.fade = Math.min(1, p.fade + dt * 1.1);
-          // 下沉动画：先随水流沿辐合带淡出 0.8s，再完成“下潜”，
+          p.fade = Math.min(1, p.fade + dt * 0.9);
+          // 下沉动画：先随水流沿辐合带淡出 1.0s，再完成“下潜”，
           // 在下方副热带辐散带重新“上涌”淡入——水循环连续、没有瞬移跳变
           if (p.sinking) {
             p.sinkT += dt;
-            const prog = p.sinkT / 0.8;
+            const prog = p.sinkT / 1.0;
             if (prog >= 1) {
               let tried = 0, ok = false;
               while (tried++ < 60 && !ok) {
@@ -442,7 +454,7 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
         // 带内人口保持在一个较稀的平衡值，辐合线是一条流动的窄带，而不是一堵墙
         const inConv = (la: number) => Math.abs(la) < 5 || (Math.abs(la) > 56 && Math.abs(la) < 68);
         const bandPop = particles.filter((pg) => inConv(pg.lat)).length;
-        const bandTarget = Math.round(particles.length * 0.24);
+        const bandTarget = Math.round(particles.length * 0.22);
         const excess = bandPop - bandTarget;
         if (excess > 5) {
           const cands = particles

@@ -40,7 +40,7 @@ export function globalWind(lat: number): WindVec {
 export function oceanDrift(lat: number): WindVec {
   const a = Math.abs(lat);
   const eq = Math.exp(-(a * a) / 18); // 赤道辐合带，半宽约 ±4°
-  const pf = Math.exp(-((a - 61) * (a - 61)) / 25); // 极锋辐合带，中心 61°，半宽约 ±5°
+  const pf = Math.exp(-((a - 61) * (a - 61)) / 45); // 极锋辐合带，中心 61°，半宽约 ±7°（加宽避免聚成一条线）
   return { dx: -eq + pf * 1.4, dy: 0, strength: 1 };
 }
 
