@@ -14,6 +14,8 @@ interface FParticle {
   seed: number;
   stallT: number;
   bandT: number;   // 在辐合带(赤道±5° / 60°±6°)停留时间
+  sinking: boolean; // 正沿辐合带“下沉”（淡出中，随后在副热带重新上涌）
+  sinkT: number;    // 下沉进度 0..0.8s
   fade: number;    // 重新上涌时的淡入进度 0..1
   trail: { x: number; y: number }[];
 }
@@ -136,6 +138,8 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
           seed: Math.random() * 100,
           stallT: 0,
           bandT: 0,
+          sinking: false,
+          sinkT: 0,
           fade: 1,
           trail: [],
         });
@@ -234,13 +238,20 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
         { zh: '西风带', min: 30, max: 60, col: 'rgba(150,225,255,0.045)' },
         { zh: '极地东风带', min: 60, max: 90, col: 'rgba(94,200,255,0.04)' },
       ];
-      // 1) 色带
+      // 1) 色带（上下缘羽化，不出现生硬横线）
       for (const b of bands) {
         for (const hem of [1, -1]) {
           const y0 = (90 - Math.max(b.min, b.max) * hem) * view.scaleY;
           const y1 = (90 - Math.min(b.min, b.max) * hem) * view.scaleY;
-          ctx.fillStyle = b.col;
-          ctx.fillRect(0, y0, w, y1 - y0);
+          const dh = y1 - y0;
+          const g = ctx.createLinearGradient(0, y0, 0, y1);
+          const edge = Math.min(8, dh * 0.15);
+          g.addColorStop(0, 'rgba(0,0,0,0)');
+          g.addColorStop(edge / dh, b.col);
+          g.addColorStop(1 - edge / dh, b.col);
+          g.addColorStop(1, 'rgba(0,0,0,0)');
+          ctx.fillStyle = g;
+          ctx.fillRect(0, Math.floor(y0), w, Math.ceil(dh));
         }
       }
       ctx.lineCap = 'round';
@@ -283,53 +294,7 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
           }
         }
       }
-      // 3) 表层水的响应方向（只有盛行风开启时才有“水流”可循）
-      if (windOn) {
-        const yE = (90 - 0) * view.scaleY;
-        // 赤道辐合 → 表层水沿赤道向西（赤道流）
-        const eqCol = 'rgba(111,227,224,0.85)';
-        ctx.fillStyle = eqCol;
-        ctx.strokeStyle = eqCol;
-        ctx.lineWidth = 1.6;
-        const spacing = 58;
-        // 赤道流箭头朝西（←），整体向左滑动
-        const phase = (spacing * 2 - (time * 16) % (spacing * 2)) % (spacing * 2);
-        for (let x = phase; x > -spacing * 2; x -= spacing * 2) {
-          ctx.beginPath();
-          ctx.moveTo(x - 7, yE);
-          ctx.lineTo(x + 7, yE);
-          ctx.moveTo(x + 7, yE);
-          ctx.lineTo(x + 1, yE - 3.4);
-          ctx.moveTo(x + 7, yE);
-          ctx.lineTo(x + 1, yE + 3.4);
-          ctx.stroke();
-        }
-        ctx.font = '600 10.5px sans-serif';
-        ctx.fillText('表层水 · 赤道流 → 西（辐合处不下沉不走回头路）', 8, yE + 15);
-        // 极锋辐合 → 表层水沿 60° 向东（副极地环流 / 西风漂流）
-        for (const hem of [1, -1]) {
-          const yF = (90 - 61 * hem) * view.scaleY;
-          const pfCol = 'rgba(255,173,110,0.85)';
-          ctx.fillStyle = pfCol;
-          ctx.strokeStyle = pfCol;
-          ctx.lineWidth = 1.6;
-          // 极锋流箭头朝东（→），南北半球都向右滑动
-          const phaseF = (time * 13 + w) % (spacing * 2);
-          for (let x = phaseF - spacing * 2; x < w + spacing; x += spacing * 2) {
-            ctx.beginPath();
-            ctx.moveTo(x - 7, yF);
-            ctx.lineTo(x + 7, yF);
-            ctx.moveTo(x + 7, yF);
-            ctx.lineTo(x + 1, yF - 3.4);
-            ctx.moveTo(x + 7, yF);
-            ctx.lineTo(x + 1, yF + 3.4);
-            ctx.stroke();
-          }
-          ctx.font = '600 10.5px sans-serif';
-          ctx.fillText(`表层水 · ${hem > 0 ? '北' : '南'}纬 60° 极锋 → 东（副极地环流）`, 8, yF + (hem > 0 ? 14 : -5));
-        }
-      }
-      // 4) 风带名称 + 风向说明
+      // 3) 风带名称 + 风向说明
       ctx.font = '600 10px sans-serif';
       ctx.fillStyle = 'rgba(175,215,245,0.8)';
       ctx.fillText('信风带 · 吹向赤道并偏西', 8, (90 - 17.5) * view.scaleY);
@@ -338,7 +303,7 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
       ctx.fillText('西风带 · 吹向极地并偏东', 8, (90 + 45) * view.scaleY + 11);
       ctx.fillStyle = 'rgba(255,214,170,0.55)';
       ctx.fillText('赤道无风带', 8, (90 - 2.5) * view.scaleY + 10);
-      // 5) 图例
+      // 4) 图例
       ctx.font = '500 10px sans-serif';
       ctx.fillStyle = 'rgba(150,190,225,0.6)';
       ctx.fillText('箭头 = 盛行风风向 · 圆点 = 表层海水（被风吹着流动）', 8, h - 12);
@@ -359,7 +324,7 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
       if (st.windBelts) drawBelts(time);
 
       // 物理：风力 + 连续性辐合转向 + 地转偏向 + 摩擦
-      const windK = (st.surfaceWind ? st.windK / 100 : 0) * 1.6;
+      const windK = (st.surfaceWind ? st.windK / 100 : 0) * 2.0;
       const corK = (st.coriolis ? st.corK / 100 : 0) * 2.4;
       const fric = Math.pow(st.friction / 100, dt * 4);
 
@@ -368,7 +333,7 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
           const wv = windAt(p.lng, p.lat, st.season);
           const drift = oceanDrift(p.lat); // 赤道向西 / 极锋向东
           // 两条力都随盛行风开关缩放：关掉风，水和箭头一起停
-          p.vx += (wv.dx * wv.strength + drift.dx * 0.55) * windK * dt * 55;
+          p.vx += (wv.dx * wv.strength + drift.dx * 0.85) * windK * dt * 55;
           p.vy += wv.dy * wv.strength * windK * dt * 55;
           if (st.coriolis) {
             // 北半球向右偏、南半球向左偏，强度随纬度增强
@@ -383,12 +348,12 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
             const aLat = Math.abs(p.lat);
             if (aLat > 12 && aLat < 45) {
               const off = 26 - aLat; // 正=在赤道侧, 负=在极地侧
-              const pull = off * 0.0045 * Math.exp(-((aLat - 26) * (aLat - 26)) / 120);
+              const pull = off * 0.003 * Math.exp(-((aLat - 26) * (aLat - 26)) / 170);
               p.vy += Math.sign(p.lat) * clamp(pull, -0.09, 0.09) * dt * 30;
             }
           }
           const sp = Math.hypot(p.vx, p.vy);
-          if (sp > 2.2) { p.vx *= 2.2 / sp; p.vy *= 2.2 / sp; }
+          if (sp > 2.4) { p.vx *= 2.4 / sp; p.vy *= 2.4 / sp; }
           p.vx *= fric;
           p.vy *= fric;
           const nx = p.lng + p.vx * dt * 1.35;
@@ -397,15 +362,37 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
             p.lng = nx;
             p.lat = clamp(ny, -84, 84);
           } else {
-            // 沿海岸滑动：先试 x，再试 y，卡角时加一点切向扰动
-            let bounced = false;
-            if (st.landBarrier && !inLand(nx, p.lat)) { p.lng = nx; }
-            else { p.vx *= -0.45; bounced = true; }
-            if (st.landBarrier && !inLand(p.lng, ny)) { p.lat = clamp(ny, -84, 84); }
-            else { p.vy *= -0.45; bounced = true; }
-            if (bounced) {
-              p.vx += (Math.random() - 0.5) * 0.2;
-              p.vy += (Math.random() - 0.5) * 0.12;
+            // 被陆地挡住：单轴可通行 → 沿岸滑动；斜切角 → 沿速度主导轴绕过；
+            // 四面被包（海峡/半岛尖） → 沿掩膜梯度（指向海洋的方向）平滑转向。
+            // 全程确定性转向，不做随机回弹，海水沿大陆边缘连续流过，不在死角堆积。
+            const freeX = !inLand(nx, p.lat);
+            const freeY = !inLand(p.lng, ny);
+            if (freeX && freeY) {
+              if (Math.abs(p.vx) >= Math.abs(p.vy)) p.lng = nx;
+              else p.lat = clamp(ny, -84, 84);
+            } else if (freeX) {
+              p.lng = nx;
+            } else if (freeY) {
+              p.lat = clamp(ny, -84, 84);
+            } else {
+              const m = mask;
+              const spd = Math.max(0.35, Math.hypot(p.vx, p.vy));
+              let gx = 0, gy = 0;
+              const cx = Math.floor(((p.lng + 180) / 360) * maskW);
+              const cy0 = Math.floor(((90 - p.lat) / 180) * maskH);
+              if (m) {
+                for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+                  const xx = cx + dx, yy = cy0 + dy;
+                  if (xx >= 0 && xx < maskW && yy >= 0 && yy < maskH && m[yy * maskW + xx] === 1) { gx -= dx; gy -= dy; }
+                }
+              }
+              const gm = Math.hypot(gx, gy);
+              if (gm > 0) {
+                p.vx = (gx / gm) * spd * 0.75;
+                p.vy = (gy / gm) * spd * 0.75;
+              } else {
+                p.vx *= -0.35; p.vy *= -0.35;
+              }
             }
           }
           if (p.lng > 180) p.lng -= 360;
@@ -424,43 +411,53 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
           const inBand = aLat < 5 || (aLat > 56 && aLat < 68);
           p.bandT = inBand ? p.bandT + dt : Math.max(0, p.bandT - dt * 0.8);
           p.fade = Math.min(1, p.fade + dt * 1.1);
+          // 下沉动画：先随水流沿辐合带淡出 0.8s，再完成“下潜”，
+          // 在下方副热带辐散带重新“上涌”淡入——水循环连续、没有瞬移跳变
+          if (p.sinking) {
+            p.sinkT += dt;
+            const prog = p.sinkT / 0.8;
+            if (prog >= 1) {
+              let tried = 0, ok = false;
+              while (tried++ < 60 && !ok) {
+                // 上涌点遍布两半球副热带辐散带（18–44°），那里正是水重返表层的位置
+                const nl = (Math.random() < 0.5 ? 1 : -1) * (18 + Math.random() * 26);
+                const ng = Math.random() * 360 - 180;
+                if (!inLand(ng, nl)) {
+                  const w2 = windAt(ng, nl, stateRef.current.season);
+                  const k2 = 0.5 + Math.random() * 0.4; // 一上涌就顺着当地风向走，不让“新水”在原地打转
+                  p.lng = ng; p.lat = nl;
+                  p.vx = w2.dx * k2; p.vy = w2.dy * k2;
+                  p.bandT = 0; p.sinkT = 0; p.sinking = false;
+                  p.fade = 0; p.trail = [];
+                  ok = true;
+                }
+              }
+            } else {
+              p.fade = Math.max(0, 1 - prog);
+            }
+          }
         }
         // 水循环：辐合带(赤道±5° / 60°±6°)的表层水不会无限堆积——
-        // 按滞留时间优先“下沉”，并在副热带辐散区(中纬度)重新“上涌”，
-        // 赤道流和西风漂流保持连绵，中纬度也始终有海水在流动
-        const bandPop = particles.filter((pg) => Math.abs(pg.lat) < 5 || (Math.abs(pg.lat) > 56 && Math.abs(pg.lat) < 68)).length;
-        const bandTarget = Math.round(particles.length * 0.35);
+        // 按滞留时长排队“下沉”（见上方 sinking 分支），在副热带辐散区重新“上涌”。
+        // 带内人口保持在一个较稀的平衡值，辐合线是一条流动的窄带，而不是一堵墙
+        const inConv = (la: number) => Math.abs(la) < 5 || (Math.abs(la) > 56 && Math.abs(la) < 68);
+        const bandPop = particles.filter((pg) => inConv(pg.lat)).length;
+        const bandTarget = Math.round(particles.length * 0.24);
         const excess = bandPop - bandTarget;
         if (excess > 5) {
           const cands = particles
             .map((pg, i) => ({ pg, i }))
-            .filter(({ pg }) => pg.fade >= 1 && (Math.abs(pg.lat) < 5 || (Math.abs(pg.lat) > 56 && Math.abs(pg.lat) < 68)))
+            .filter(({ pg }) => pg.fade >= 1 && !pg.sinking && pg.bandT > 1.0 && inConv(pg.lat))
             .sort((a, b) => b.pg.bandT - a.pg.bandT);
-          // 基础“上涌”速率 + 随辐合带超额加大 —— 水循环永远不停
-          const rate = 5 + Math.max(0, excess) / 14;
-          const toRecycle = Math.max(0, Math.min(cands.length, Math.round(rate * dt * 60)));
-          for (let k = 0; k < toRecycle; k++) {
-            const { pg } = cands[k];
-            let tl = 0, ok = false;
-            while (tl++ < 60 && !ok) {
-              // 上涌点偏向副热带(18–44°)，那里正是辐散带，水从这里重返表层
-              const nl = (Math.random() < 0.5 ? 1 : -1) * (18 + Math.random() * 26);
-              const ng = Math.random() * 360 - 180;
-              if (!inLand(ng, nl)) {
-                const w2 = windAt(ng, nl, stateRef.current.season);
-                const k2 = 0.1 + Math.random() * 0.3;
-                pg.lng = ng; pg.lat = nl;
-                pg.vx = w2.dx * k2; pg.vy = w2.dy * k2;
-                pg.bandT = 0; pg.fade = 0; pg.trail = [];
-                ok = true;
-              }
-            }
-          }
+          // 温和下沉速率：辐合带越挤沉得越快；每秒 3–10 个，沿整条带连续发生
+          const rate = 3.5 + Math.max(0, excess) / 18;
+          const toSink = Math.max(0, Math.min(cands.length, Math.round(rate * dt * 60)));
+          for (let k = 0; k < toSink; k++) cands[k].pg.sinking = true;
         }
       }
 
       // 绘制粒子
-      const maxV = 2.2;
+      const maxV = 2.4;
       ctx.lineCap = 'round';
       for (const p of particles) {
         const sp = Math.hypot(p.vx, p.vy);

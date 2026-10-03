@@ -72,8 +72,8 @@ export function windAt(lng: number, lat: number, season: Season): WindVec {
   const g = globalWind(lat);
   const m = monsoonWind(lng, lat, season);
   if (!m) return g;
-  // 季风与背景风加权混合
-  const w = Math.min(1, m.strength);
+  // 季风与背景风加权混合（教学上行星风带为主，季风只起修饰，避免扰散信风/西风的主体流场）
+  const w = Math.min(1, m.strength) * 0.6;
   return {
     dx: g.dx * (1 - w * 0.75) + m.dx * w * 0.9,
     dy: g.dy * (1 - w * 0.75) + m.dy * w * 0.9,
