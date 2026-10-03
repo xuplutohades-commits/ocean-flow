@@ -14,7 +14,7 @@ const CHAIN = [
 
 const TEACH_STEPS = [
   { t: '第一步 · 先看舞台', desc: '打开“全球风带”，观察七带六风：赤道无风带、信风带、西风带、极地东风带。', set: { windBelts: true, surfaceWind: false, coriolis: false, landBarrier: true } },
-  { t: '第二步 · 风推水动', desc: '再打开“盛行风”，粒子立刻顺着风带漂移：信风把水推向赤道方向，西风把水推向极地方向。注意粒子的主要方向。', set: { windBelts: true, surfaceWind: true, coriolis: false, landBarrier: true } },
+  { t: '第二步 · 风推水动', desc: '再打开“盛行风”，粒子顺着风带漂移：信风把水推向赤道方向，西风把水推向极地方向。表层海水不会堆积——赤道辐合处水转而沿赤道向西流（赤道流），60° 极锋处水沿锋面东流（副极地环流），就这样绕地球循环不断。', set: { windBelts: true, surfaceWind: true, coriolis: false, landBarrier: true } },
   { t: '第三步 · 地球让它偏转', desc: '打开“地转偏向力”，对比南北半球：北半球粒子向右偏、南半球向左偏，漂移轨迹变成斜向的“螺旋”。', set: { windBelts: true, surfaceWind: true, coriolis: true, landBarrier: true } },
   { t: '第四步 · 大陆围出环流', desc: '关闭“海陆分布”再打开：没有大陆时粒子几乎只在经向和纬向之间来回；有大陆后，每个大洋的“8 字形”环流立刻成形。', set: { windBelts: true, surfaceWind: true, coriolis: true, landBarrier: true } },
 ];
@@ -34,6 +34,7 @@ export default function FormationPage() {
   const [friction, setFriction] = useState(72);
   const [count, setCount] = useState(1500);
   const [play, setPlay] = useState(true);
+  const [resetNonce, setResetNonce] = useState(0);
   const [step, setStep] = useState<number | null>(null);
 
   const state: FormationState = useMemo(() => ({
@@ -47,7 +48,8 @@ export default function FormationPage() {
     count,
     season,
     play,
-  }), [app.windBelts, app.surfaceWind, app.coriolis, app.landBarrier, windK, corK, friction, count, season, play]);
+    resetNonce,
+  }), [app.windBelts, app.surfaceWind, app.coriolis, app.landBarrier, windK, corK, friction, count, season, play, resetNonce]);
 
   const applyStep = (i: number) => {
     setStep(i);
@@ -96,11 +98,11 @@ export default function FormationPage() {
               </div>
               <div className="flex items-center gap-2">
                 <button className="btn flex-1" onClick={() => setPlay(!play)}>{play ? '❚❚ 暂停' : '▶ 继续'}</button>
-                <button className="btn flex-1" onClick={() => { setPlay(true); }}>↻ 重置粒子</button>
+                <button className="btn flex-1" onClick={() => { setPlay(true); setResetNonce((n) => n + 1); }}>↻ 重置粒子</button>
               </div>
               <div className="text-[11px] leading-relaxed text-[#5f7b99]">
                 <b className="text-[#8fb7d8]">观察要点：</b>
-                ① 只有风：粒子沿风带直线漂移；② 加偏向力：北半球右偏、南半球左偏；③ 加陆地：副热带环流成形，西侧（大陆东岸）流速明显变快——这就是“西边界强化”。
+                ① 只有风：粒子沿风带漂移，赤道附近转西、60° 附近转东，永远在循环；② 加偏向力：北半球右偏、南半球左偏；③ 加陆地：副热带环流成形，西侧（大陆东岸）流速明显变快——这就是“西边界强化”；④ 海水源源不断，粒子不会“跑完就停”。
               </div>
             </Panel>
 
