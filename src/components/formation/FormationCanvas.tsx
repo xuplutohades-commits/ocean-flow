@@ -6,6 +6,20 @@ import { windAt, oceanDrift, coriolisScale, globalWind } from '@/lib/wind';
 import { pseudoNoise } from '@/lib/noise';
 import type { Season } from '@/types';
 
+interface LandFeature {
+  geometry?: { type?: string; coordinates?: unknown } | null;
+}
+type LandGeo = { features?: LandFeature[] };
+
+/** 把 GeoJSON 的 Polygon / MultiPolygon 展开为可绘制的环线（度坐标） */
+function landRings(geom: { type?: string; coordinates?: unknown } | null | undefined): number[][][] {
+  const out: number[][][] = [];
+  if (!geom) return out;
+  if (geom.type === 'Polygon') out.push(...(geom.coordinates as number[][][]));
+  else if (geom.type === 'MultiPolygon') for (const p of geom.coordinates as number[][][][]) out.push(...p);
+  return out;
+}
+
 interface FParticle {
   lng: number;
   lat: number;
@@ -78,7 +92,7 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
     let particles: FParticle[] = [];
     let baseBuf: HTMLCanvasElement | null = null;
 
-    function buildMask() {
+    function buildMask(geo: LandGeo) {
       maskW = 320;
       maskH = 160;
       mask = new Uint8Array(maskW * maskH);
@@ -89,33 +103,37 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
       mctx.fillStyle = '#000';
       mctx.fillRect(0, 0, maskW, maskH);
       mctx.fillStyle = '#fff';
-      fetch('/data/land.json')
-        .then((r) => r.json())
-        .then((geo) => {
-          const p2d = (lng: number, lat: number) => {
-            const [x, y] = project(lng, lat);
-            return [x * maskW, y * maskH] as const;
-          };
-          for (const f of geo.features ?? []) {
-            const geom = f.geometry;
-            const rings: number[][][] = [];
-            if (geom.type === 'Polygon') rings.push(...geom.coordinates);
-            else if (geom.type === 'MultiPolygon') for (const p of geom.coordinates) rings.push(...p);
-            for (const ring of rings) {
-              mctx.beginPath();
-              ring.forEach(([x, y], i) => {
-                const [px, py] = p2d(x, y);
-                i === 0 ? mctx.moveTo(px, py) : mctx.lineTo(px, py);
-              });
-              mctx.closePath();
-              mctx.fill();
-            }
-          }
-          const data = mctx.getImageData(0, 0, maskW, maskH).data;
-          for (let i = 0; i < maskW * maskH; i++) (mask as Uint8Array)[i] = data[i * 4] > 128 ? 1 : 0;
-          maskReady = true;
-          if (particles.length === 0) spawnRef.current(stateRef.current.count);
-        });
+      const p2d = (lng: number, lat: number) => {
+        const [x, y] = project(lng, lat);
+        return [x * maskW, y * maskH] as const;
+      };
+      for (const f of geo.features ?? []) {
+        for (const ring of landRings(f.geometry)) {
+          mctx.beginPath();
+          ring.forEach(([x, y], i) => {
+            const [px, py] = p2d(x, y);
+            i === 0 ? mctx.moveTo(px, py) : mctx.lineTo(px, py);
+          });
+          mctx.closePath();
+          mctx.fill();
+        }
+      }
+      const data = mctx.getImageData(0, 0, maskW, maskH).data;
+      for (let i = 0; i < maskW * maskH; i++) (mask as Uint8Array)[i] = data[i * 4] > 128 ? 1 : 0;
+      maskReady = true;
+      if (particles.length === 0) spawnRef.current(stateRef.current.count);
+    }
+
+    // 陆地数据加载（失败自动重试，防止离线/瞬断导致粒子永远不出现）
+    function fetchLand(onOk: (geo: LandGeo) => void) {
+      let tries = 0;
+      const attempt = () => {
+        fetch('/data/land.json')
+          .then((r) => r.json())
+          .then(onOk)
+          .catch(() => { if (tries++ < 4) setTimeout(attempt, 2500); });
+      };
+      attempt();
     }
 
     // 撒粒子：初始速度顺着当地风的方向，粒子一出现就在流动
@@ -208,26 +226,20 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
       }
     }
 
-    fetch('/data/land.json')
-      .then((r) => r.json())
-      .then((geo) => {
-        landPolys = [];
-        for (const f of geo.features ?? []) {
-          const geom = f.geometry;
-          const rings: number[][][] = [];
-          if (geom.type === 'Polygon') rings.push(...geom.coordinates);
-          else if (geom.type === 'MultiPolygon') for (const p of geom.coordinates) rings.push(...p);
-          for (const ring of rings) {
-            if (ring.length < 3) continue;
-            landPolys.push(ring.map(([x, y]) => {
-              const [px, py] = project(x, y);
-              return { x: px * w, y: py * h };
-            }));
-          }
+    fetchLand((geo: LandGeo) => {
+      landPolys = [];
+      for (const f of geo.features ?? []) {
+        for (const ring of landRings(f.geometry)) {
+          if (ring.length < 3) continue;
+          landPolys.push(ring.map(([x, y]) => {
+            const [px, py] = project(x, y);
+            return { x: px * w, y: py * h };
+          }));
         }
-        redrawLand(baseBuf?.getContext('2d')!);
-        buildMask();
-      });
+      }
+      redrawLand(baseBuf?.getContext('2d')!);
+      buildMask(geo);
+    });
 
     // 绘制风带 + 风向箭头 + 水流的响应方向
     function drawBelts(time: number) {
@@ -314,10 +326,12 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
     let time = 0;
 
     function frame(now: number) {
-      const st = stateRef.current;
-      const dt = clamp((now - last) / 1000, 0, 0.05);
-      last = now;
-      time += dt;
+      lastTick = performance.now();
+      try {
+        const st = stateRef.current;
+        const dt = clamp((now - last) / 1000, 0, 0.05);
+        last = now;
+        time += dt;
 
       ctx.clearRect(0, 0, w, h);
       if (baseBuf) ctx.drawImage(baseBuf, 0, 0, w, h);
@@ -431,8 +445,8 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
             if (prog >= 1) {
               let tried = 0, ok = false;
               while (tried++ < 60 && !ok) {
-                // 上涌点遍布两半球副热带辐散带（18–44°），那里正是水重返表层的位置
-                const nl = (Math.random() < 0.5 ? 1 : -1) * (18 + Math.random() * 26);
+                // 上涌点遍布两半球副热带到中纬（16–48°），那里正是水重返表层的位置
+                const nl = (Math.random() < 0.5 ? 1 : -1) * (14 + Math.random() * 34);
                 const ng = Math.random() * 360 - 180;
                 if (!inLand(ng, nl)) {
                   const w2 = windAt(ng, nl, stateRef.current.season);
@@ -504,8 +518,35 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
       ctx.fillText('北半球 · 偏转方向向右（顺时针）', 10, yT);
       ctx.fillText('南半球 · 偏转方向向左（逆时针）', 10, (90 + 55) * view.scaleY);
 
+      } catch {
+        // 单帧异常只跳过本帧，绝不能杀死动画循环——
+        // 否则画面会永久停在只剩底图的那一帧，“粒子全没了”。
+        try {
+          const win = window as unknown as { __pfErrCount?: number };
+          win.__pfErrCount = (win.__pfErrCount || 0) + 1;
+        } catch { /* 记录失败也无所谓，继续跑 */ }
+      }
+      // raf 调度放在 try/catch 之外：任何异常都无法阻断下一帧
       raf = requestAnimationFrame(frame);
     }
+
+    // 自愈看门狗：rAF 一旦卡死（显示休眠唤醒、后台标签页恢复、异常漏网等），
+    // 立即重启循环；粒子被清空则重新撒种，保证“海水源源不断”
+    let lastTick = 0;
+    function startLoop() {
+      cancelAnimationFrame(raf);
+      lastTick = performance.now();
+      raf = requestAnimationFrame(frame);
+    }
+    const revive = () => {
+      if (!document.hidden && maskReady && performance.now() - lastTick > 1500) startLoop();
+      if (maskReady && particles.length === 0) spawnRef.current(stateRef.current.count);
+    };
+    const watchdog = window.setInterval(() => { if (!document.hidden) revive(); }, 2000);
+    const onShow = () => { if (!document.hidden) revive(); };
+    document.addEventListener('visibilitychange', onShow);
+    window.addEventListener('focus', onShow);
+    window.addEventListener('pageshow', onShow);
 
     const ro = new ResizeObserver(() => {
       resize();
@@ -513,11 +554,15 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
     });
     ro.observe(wrap);
     resize();
-    raf = requestAnimationFrame(frame);
+    startLoop();
 
     return () => {
       ro.disconnect();
       cancelAnimationFrame(raf);
+      window.clearInterval(watchdog);
+      document.removeEventListener('visibilitychange', onShow);
+      window.removeEventListener('focus', onShow);
+      window.removeEventListener('pageshow', onShow);
     };
   }, []);
 

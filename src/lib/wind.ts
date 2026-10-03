@@ -28,7 +28,9 @@ export function globalWind(lat: number): WindVec {
   let dy = (-0.12 * trades + 0.10 * west - 0.24 * polar) * n;
   const m0 = Math.hypot(dx, dy);
   const m = m0 || 1;
-  return { dx: dx / m, dy: dy / m, strength: Math.min(1, m0) };
+  // 过渡带（信风↔西风、西风↔极地东风）风速接近零时给一个微弱下限，
+  // 避免水粒子在风带交界处近乎停车，长时间运行后出现大片“空海”死区
+  return { dx: dx / m, dy: dy / m, strength: Math.max(0.16, Math.min(1, m0)) };
 }
 
 /**
