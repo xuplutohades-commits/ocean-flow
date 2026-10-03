@@ -64,11 +64,3 @@ export interface OceanCase {
   sstProfile?: { lat: number; temp: number }[];
 }
 
-export interface WindArrow {
-  lng: number;
-  lat: number;
-  /** 风向角（度，0=东, 90=南, 180=西, 270=北） */
-  dir: number;
-  strength: number;
-  label?: string;
-}

@@ -7,34 +7,13 @@ import ThreeCellDiagram from '@/components/atmosphere/ThreeCellDiagram';
 import { Panel, Slider, Seg, Reveal } from '@/components/ui/kit';
 import { useApp } from '@/store/app';
 import { monsoonWind } from '@/lib/wind';
-import type { Season, WindArrow } from '@/types';
+import type { Season } from '@/types';
 
 const ENSO_PRESETS = [
   { label: '正常年', anomaly: 0, tradeWind: 70 },
   { label: '厄尔尼诺', anomaly: 2.5, tradeWind: 18 },
   { label: '拉尼娜', anomaly: -2.2, tradeWind: 92 },
 ];
-
-function monsoonArrows(season: Season): WindArrow[] {
-  const out: WindArrow[] = [];
-  for (let lng = 42; lng <= 100; lng += 12) {
-    for (let lat = 2; lat <= 24; lat += 7) {
-      const w = monsoonWind(lng, lat, season);
-      if (!w) continue;
-      const dir = (Math.atan2(w.dy, w.dx) * 180) / Math.PI;
-      out.push({ lng, lat, dir: ((dir % 360) + 360) % 360, strength: w.strength * 100 });
-    }
-  }
-  for (let lng = 104; lng <= 142; lng += 12) {
-    for (let lat = 18; lat <= 42; lat += 8) {
-      const w = monsoonWind(lng, lat, season);
-      if (!w) continue;
-      const dir = (Math.atan2(w.dy, w.dx) * 180) / Math.PI;
-      out.push({ lng, lat, dir: ((dir % 360) + 360) % 360, strength: w.strength * 90 });
-    }
-  }
-  return out;
-}
 
 function MonsoonSchematic({ season }: { season: Season }) {
   const summer = season === 'summer';
@@ -82,7 +61,7 @@ export default function AtmospherePage() {
   const mapRef = useRef<OceanMapHandle>(null);
 
   const enso: EnsoState = useMemo(() => ({ anomaly, tradeWind }), [anomaly, tradeWind]);
-  const arrows = useMemo(() => monsoonArrows(season), [season]);
+  const windField = useMemo(() => (lng: number, lat: number) => monsoonWind(lng, lat, season), [season]);
 
   const reversed = anomaly > 1.2;
   const upwell = reversed ? 6 : Math.round(tradeWind * 0.95);
@@ -152,7 +131,8 @@ export default function AtmospherePage() {
               ref={mapRef}
               region={{ center: [72, 12], zoom: 3.4 }}
               season={season}
-              windArrows={arrows}
+              windField={windField}
+              upwelling
               showLabels
               dense={1.1}
               interactive
@@ -160,9 +140,9 @@ export default function AtmospherePage() {
               onSelect={() => {}}
             />
             <div className="absolute top-3 left-3 flex items-center gap-2 pointer-events-none">
-              <span className="badge" style={{ background: 'rgba(4,14,28,0.78)' }}>风向箭头随时变化</span>
+              <span className="badge" style={{ background: 'rgba(4,14,28,0.78)' }}>盛行风（短流线粒子）随季节转向</span>
               {season === 'summer' ? (
-                <span className="badge badge-cold" style={{ background: 'rgba(4,14,28,0.78)' }}>索马里寒流（上升流）</span>
+                <span className="badge badge-cold" style={{ background: 'rgba(4,14,28,0.78)' }}>索马里寒流（上升流·冷蓝水带）</span>
               ) : (
                 <span className="badge badge-warm" style={{ background: 'rgba(4,14,28,0.78)' }}>索马里暖流（上升流停止）</span>
               )}

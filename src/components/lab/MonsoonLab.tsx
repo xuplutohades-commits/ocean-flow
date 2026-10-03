@@ -4,23 +4,19 @@ import { OceanMap, type OceanMapHandle } from '@/components/map/OceanMap';
 import { monsoonWind } from '@/lib/wind';
 import { Seg } from '@/components/ui/kit';
 import { useApp } from '@/store/app';
-import type { Season, WindArrow } from '@/types';
+import type { Season } from '@/types';
 
 export default function MonsoonLab() {
   const { season, setSeason } = useApp();
   const mapRef = useRef<OceanMapHandle>(null);
   const [str, setStr] = useState(60);
 
-  const arrows = useMemo<WindArrow[]>(() => {
-    const out: WindArrow[] = [];
-    for (let lng = 42; lng <= 100; lng += 10) {
-      for (let lat = 2; lat <= 26; lat += 6) {
-        const w = monsoonWind(lng, lat, season);
-        if (!w) continue;
-        out.push({ lng, lat, dir: (Math.atan2(w.dy, w.dx) * 180) / Math.PI, strength: w.strength * str * 1.2 });
-      }
-    }
-    return out;
+  const windField = useMemo(() => {
+    const k = str / 60;
+    return (lng: number, lat: number) => {
+      const w = monsoonWind(lng, lat, season);
+      return w ? { dx: w.dx, dy: w.dy, strength: w.strength * k } : null;
+    };
   }, [season, str]);
 
   const winter = season === 'winter';
@@ -32,7 +28,8 @@ export default function MonsoonLab() {
           ref={mapRef}
           region={{ center: [70, 12], zoom: 3.2 }}
           season={season}
-          windArrows={arrows}
+          windField={windField}
+          upwelling
           showLabels
           dense={1.1}
           interactive={false}
@@ -50,11 +47,11 @@ export default function MonsoonLab() {
       </div>
       <div className="space-y-4">
         <div className="rounded-[12px] p-4" style={{ background: 'rgba(8,22,40,0.6)', border: '1px solid rgba(126,190,255,0.16)' }}>
-          <div className="kicker-dim mb-2">季风风速（箭头强度）</div>
+          <div className="kicker-dim mb-2">季风风速（流线强度）</div>
           <input type="range" className="slider" min={10} max={100} value={str} onChange={(e) => setStr(Number(e.target.value))} />
           <div className="num text-[13px] text-[#6fe3e0] mt-1.5">{str}%</div>
           <p className="mt-2 text-[12px] leading-relaxed text-[#8ba7c6]">
-            风速越大，箭头越长，环流越“结实”。注意：<b>{winter ? '索马里沿岸冬季转为暖流（向岸风、无上升流）' : '索马里沿岸夏季出现寒流（离岸风 → 上升流）'}</b>。
+            风速越大，流线越长越亮，环流越“结实”。注意：<b>{winter ? '索马里沿岸冬季转为暖流（向岸风、无上升流）' : '索马里沿岸夏季出现寒流（离岸风 → 上升流）'}</b>。
           </p>
         </div>
         <div className="rounded-[12px] p-4" style={{ background: 'rgba(111,227,224,0.06)', border: '1px solid rgba(111,227,224,0.25)' }}>

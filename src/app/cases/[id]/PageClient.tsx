@@ -1,7 +1,7 @@
 'use client';
 import Link from 'next/link';
 import { notFound } from 'next/navigation';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { OceanMap } from '@/components/map/OceanMap';
 import { useCaseImages } from '@/components/cases/useCaseImages';
 import { SstChart, FogViz, TempCompare } from '@/components/cases/CaseViz';
@@ -10,6 +10,7 @@ import { Panel, Seg, Reveal } from '@/components/ui/kit';
 import { CASES, CASE_MAP } from '@/data/cases';
 import { CURRENT_MAP } from '@/data/currents';
 import { useApp } from '@/store/app';
+import { monsoonWind } from '@/lib/wind';
 import type { Season } from '@/types';
 
 export default function PageClient({ id }: { id: string }) {
@@ -24,6 +25,7 @@ function CaseBody({ cid }: { cid: string }) {
   const [sec, setSec] = useState(0);
   const imgs = useCaseImages();
   const main = CURRENT_MAP[c.currentIds[0]];
+  const windField = useMemo(() => (lng: number, lat: number) => monsoonWind(lng, lat, season), [season]);
 
   const vizFor = (viz: string | undefined) => {
     switch (viz) {
@@ -42,7 +44,7 @@ function CaseBody({ cid }: { cid: string }) {
       case 'seasonal': return (
         <div className="rounded-[10px] overflow-hidden relative" style={{ border: '1px solid rgba(126,190,255,0.16)' }}>
           <OceanMap currentIds={['monsoonSummer', 'somaliSummer', 'indSouthEq']} region={{ center: [67, 10], zoom: 2.8 }}
-            season={season} showLabels dense={1} />
+            season={season} showLabels dense={1} windField={windField} upwelling />
           <div className="absolute bottom-2 left-2">
             <Seg<Season> options={[{ id: 'summer', label: '夏季·顺时针' }, { id: 'winter', label: '冬季·逆时针' }]}
               value={season} onChange={setSeason} />
