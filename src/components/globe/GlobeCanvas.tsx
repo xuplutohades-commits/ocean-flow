@@ -1,4 +1,5 @@
 'use client';
+import { asset } from '@/lib/asset';
 import { useEffect, useMemo, useRef } from 'react';
 import { Canvas, useFrame, useLoader } from '@react-three/fiber';
 import { OrbitControls, Stars } from '@react-three/drei';
@@ -323,7 +324,7 @@ function SunGlint() {
 
 /** 自然色地球：原始 NASA 贴图，陆地是陆地、海面是海面，Phong 高光模拟海面反光 */
 function Earth() {
-  const texture = useLoader(THREE.TextureLoader, '/textures/earth.jpg');
+  const texture = useLoader(THREE.TextureLoader, asset('/textures/earth.jpg'));
   useMemo(() => {
     texture.colorSpace = THREE.SRGBColorSpace;
     texture.anisotropy = 8;

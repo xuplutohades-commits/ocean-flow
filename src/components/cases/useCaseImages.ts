@@ -1,5 +1,6 @@
 'use client';
 import { useEffect, useState } from 'react';
+import { asset } from '@/lib/asset';
 import type { CaseImage } from '@/types';
 
 let cache: Record<string, CaseImage> | null = null;
@@ -10,13 +11,14 @@ export function useCaseImages(): Record<string, CaseImage> | null {
   useEffect(() => {
     if (cache) { setImgs(cache); return; }
     if (!pending) {
-      pending = fetch('/data/case-images.json')
+      pending = fetch(asset('/data/case-images.json'))
         .then((r) => r.json())
         .then((j) => {
           // 统一 https
           const out: Record<string, CaseImage> = {};
           for (const [k, v] of Object.entries(j)) {
-            out[k] = { ...(v as CaseImage), url: (v as CaseImage).url.replace(/^http:/, 'https:') };
+            const img = v as CaseImage;
+            out[k] = { ...img, url: asset(img.url.replace(/^http:/, 'https:')) };
           }
           cache = out;
           return out;

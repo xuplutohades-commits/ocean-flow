@@ -1,6 +1,7 @@
 'use client';
 /* eslint-disable react-hooks/exhaustive-deps */
 import { useEffect, useRef } from 'react';
+import { asset } from '@/lib/asset';
 import { project, clamp } from '@/lib/geo';
 import { windAt, oceanDrift, coriolisScale, globalWind } from '@/lib/wind';
 import { pseudoNoise } from '@/lib/noise';
@@ -129,7 +130,7 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
     function fetchLand(onOk: (geo: LandGeo) => void) {
       let tries = 0;
       const attempt = () => {
-        fetch('/data/land.json')
+        fetch(asset('/data/land.json'))
           .then((r) => r.json())
           .then(onOk)
           .catch(() => { if (tries++ < 4) setTimeout(attempt, 2500); });

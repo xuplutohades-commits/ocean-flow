@@ -1,5 +1,6 @@
 'use client';
 /* eslint-disable react-hooks/exhaustive-deps */
+import { asset } from '@/lib/asset';
 import { forwardRef, useEffect, useImperativeHandle, useRef, useCallback } from 'react';
 import { CURRENTS, CURRENT_MAP, pathOf, typeColor, seasonalType } from '@/data/currents';
 import { project, unproject, samplePath, distToPath, pointAt, bboxOf, clamp, type SampledPath, type Pt } from '@/lib/geo';
@@ -128,7 +129,7 @@ type View = { lng0: number; lat0: number; scale: number };
 let landPromise: Promise<{ x: number; y: number }[][]> | null = null;
 function loadLand(): Promise<{ x: number; y: number }[][]> {
   if (!landPromise) {
-    landPromise = fetch('/data/land.json')
+    landPromise = fetch(asset('/data/land.json'))
       .then((r) => r.json())
       .then((geo) => {
         const polys: { x: number; y: number }[][] = [];

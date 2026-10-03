@@ -1,4 +1,5 @@
 'use client';
+import { asset } from '@/lib/asset';
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { OceanMap, type OceanMapHandle } from '@/components/map/OceanMap';
 import WalkerCanvas, { type EnsoState } from '@/components/atmosphere/WalkerCanvas';
@@ -290,7 +291,7 @@ function ImageCard({ k }: { k: string }) {
   const [meta, setMeta] = useState<{ url: string; caption: string; source: string; pageUrl: string } | null>(null);
   useEffect(() => {
     let alive = true;
-    fetch('/data/case-images.json').then((r) => r.json()).then((j) => { if (alive) setMeta(j[k] ?? null); }).catch(() => {});
+    fetch(asset('/data/case-images.json')).then((r) => r.json()).then((j) => { if (alive && j[k]) setMeta({ ...j[k], url: asset(j[k].url) }); }).catch(() => {});
     return () => { alive = false; };
   }, [k]);
   if (!meta) return <div className="text-[12px] text-[#5f7b99]">正在加载影像…</div>;
