@@ -28,6 +28,7 @@ interface FParticle {
   seed: number;
   stallT: number;
   bandT: number;   // 在辐合带(赤道±5° / 60°±6°)停留时间
+  coastT: number;   // 连续贴岸时间（贴岸过久会被涡旋效应甩离海岸）
   sinking: boolean; // 正沿辐合带“下沉”（淡出中，随后在副热带重新上涌）
   sinkT: number;    // 下沉进度 0..0.8s
   fade: number;    // 重新上涌时的淡入进度 0..1
@@ -156,6 +157,7 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
           seed: Math.random() * 100,
           stallT: 0,
           bandT: 0,
+          coastT: 0,
           sinking: false,
           sinkT: 0,
           fade: 1,
@@ -379,6 +381,10 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
               p.vy += clamp((weave - p.lat) * 0.022, -0.045, 0.045) * dt * 30;
             }
           }
+          // 开阔大洋“中尺度涡”微扰：粒子缓慢游走，避免全体直线涌向海岸
+          // （随盛行风开关缩放：关掉风，水与涡一起停）
+          p.vx += Math.sin(time * 0.5 + p.seed * 2.1) * 0.015 * (st.surfaceWind ? 1 : 0) * dt * 30;
+          p.vy += Math.cos(time * 0.43 + p.seed * 1.7) * 0.015 * (st.surfaceWind ? 1 : 0) * dt * 30;
           const sp = Math.hypot(p.vx, p.vy);
           if (sp > 2.4) { p.vx *= 2.4 / sp; p.vy *= 2.4 / sp; }
           p.vx *= fric;
@@ -388,38 +394,38 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
           if (!st.landBarrier || (!inLand(nx, ny))) {
             p.lng = nx;
             p.lat = clamp(ny, -84, 84);
+            p.coastT = Math.max(0, p.coastT - dt * 2);
           } else {
-            // 被陆地挡住：单轴可通行 → 沿岸滑动；斜切角 → 沿速度主导轴绕过；
-            // 四面被包（海峡/半岛尖） → 沿掩膜梯度（指向海洋的方向）平滑转向。
-            // 全程确定性转向，不做随机回弹，海水沿大陆边缘连续流过，不在死角堆积。
-            const freeX = !inLand(nx, p.lat);
-            const freeY = !inLand(p.lng, ny);
-            if (freeX && freeY) {
-              if (Math.abs(p.vx) >= Math.abs(p.vy)) p.lng = nx;
-              else p.lat = clamp(ny, -84, 84);
-            } else if (freeX) {
-              p.lng = nx;
-            } else if (freeY) {
-              p.lat = clamp(ny, -84, 84);
+            // 撞岸分流：把来流整体投影到海岸切线方向——涌岸的分量被岸“接走”，
+            // 水贴着海岸以完整速度排开；海角/海峡口沿海岸轮廓切线绕行。
+            // 沿岸流滑行一段时间后被“涡旋”逐步甩离海岸，不会在岸线上越堆越厚。
+            p.coastT += dt;
+            const spd = Math.max(0.35, Math.hypot(p.vx, p.vy));
+            let gx = 0, gy = 0;
+            const cx = Math.floor(((p.lng + 180) / 360) * maskW);
+            const cy0 = Math.floor(((90 - p.lat) / 180) * maskH);
+            const m = mask;
+            if (m) {
+              for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
+                const xx = cx + dx, yy = cy0 + dy;
+                if (xx >= 0 && xx < maskW && yy >= 0 && yy < maskH && m[yy * maskW + xx] === 1) { gx -= dx; gy -= dy; }
+              }
+            }
+            const gm = Math.hypot(gx, gy);
+            if (gm > 0) {
+              // 切线 = 与“远离陆地”垂直的方向，取与来流同侧（顺着水原来的方向绕行）
+              let tx = -gy, ty = gx;
+              if (tx * p.vx + ty * p.vy < 0) { tx = -tx; ty = -ty; }
+              const tm = Math.hypot(tx, ty);
+              p.vx = (tx / tm) * spd * 0.85;
+              p.vy = (ty / tm) * spd * 0.85;
+              if (st.surfaceWind && p.coastT > 2.5) {
+                const peel = Math.min(0.10, (p.coastT - 2.5) * 0.012);
+                p.vx += (gx / gm) * peel * dt * 30 * 2;
+                p.vy += (gy / gm) * peel * dt * 30 * 2;
+              }
             } else {
-              const m = mask;
-              const spd = Math.max(0.35, Math.hypot(p.vx, p.vy));
-              let gx = 0, gy = 0;
-              const cx = Math.floor(((p.lng + 180) / 360) * maskW);
-              const cy0 = Math.floor(((90 - p.lat) / 180) * maskH);
-              if (m) {
-                for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) {
-                  const xx = cx + dx, yy = cy0 + dy;
-                  if (xx >= 0 && xx < maskW && yy >= 0 && yy < maskH && m[yy * maskW + xx] === 1) { gx -= dx; gy -= dy; }
-                }
-              }
-              const gm = Math.hypot(gx, gy);
-              if (gm > 0) {
-                p.vx = (gx / gm) * spd * 0.75;
-                p.vy = (gy / gm) * spd * 0.75;
-              } else {
-                p.vx *= -0.35; p.vy *= -0.35;
-              }
+              p.vx *= -0.4; p.vy *= -0.4;
             }
           }
           if (p.lng > 180) p.lng -= 360;
@@ -454,7 +460,7 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
                   const k2 = 0.5 + Math.random() * 0.4; // 一上涌就顺着当地风向走，不让“新水”在原地打转
                   p.lng = ng; p.lat = nl;
                   p.vx = w2.dx * k2; p.vy = w2.dy * k2;
-                  p.bandT = 0; p.sinkT = 0; p.sinking = false;
+                  p.bandT = 0; p.sinkT = 0; p.coastT = 0; p.sinking = false;
                   p.fade = 0; p.trail = [];
                   ok = true;
                 }
@@ -467,6 +473,16 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
         // 水循环：辐合带(赤道±5° / 60°±6°)的表层水不会无限堆积——
         // 按滞留时长排队“下沉”（见上方 sinking 分支），在副热带辐散区重新“上涌”。
         // 带内人口保持在一个较稀的平衡值，辐合线是一条流动的窄带，而不是一堵墙
+        {
+          // 沿岸回收：沿海岸滑行过久的水不无限堆积在岸线上——
+          // 视作沿岸下降流/被涡旋卷回外海，淡出后在开阔大洋重新上涌
+          const coastCands = particles
+            .map((pg, i) => ({ pg, i }))
+            .filter(({ pg }) => pg.fade >= 1 && !pg.sinking && pg.coastT > 5)
+            .sort((a, b) => b.pg.coastT - a.pg.coastT);
+          const coastSink = Math.max(0, Math.min(coastCands.length, Math.round(3.0 * dt * 60)));
+          for (let k = 0; k < coastSink; k++) coastCands[k].pg.sinking = true;
+        }
         const inConv = (la: number) => Math.abs(la) < 5 || (Math.abs(la) > 56 && Math.abs(la) < 68);
         const bandPop = particles.filter((pg) => inConv(pg.lat)).length;
         const bandTarget = Math.round(particles.length * 0.22);
@@ -513,7 +529,7 @@ export default function FormationCanvas({ state }: { state: FormationState }) {
         }
         ctx.fillStyle = `rgba(${r | 0},${g | 0},${b | 0},${alpha})`;
         ctx.beginPath();
-        ctx.arc(x, y, 0.75 + t * 1.1, 0, Math.PI * 2);
+        ctx.arc(x, y, 0.7 + t * 0.95, 0, Math.PI * 2);
         ctx.fill();
       }
 
