@@ -1,0 +1,26 @@
+1:"$Sreact.fragment"
+2:I[78297,["/ocean-flow/_next/static/chunks/0j9iaui0iv5lj.js","/ocean-flow/_next/static/chunks/3kukjtfb_phuu.js","/ocean-flow/_next/static/chunks/2e7y3npa7w_zv.js"],"default"]
+3:I[97367,["/ocean-flow/_next/static/chunks/0j9iaui0iv5lj.js"],"OutletBoundary"]
+4:"$Sreact.suspense"
+8:I[97367,["/ocean-flow/_next/static/chunks/0j9iaui0iv5lj.js"],"ViewportBoundary"]
+9:I[97367,["/ocean-flow/_next/static/chunks/0j9iaui0iv5lj.js"],"MetadataBoundary"]
+a:I[27201,["/ocean-flow/_next/static/chunks/0j9iaui0iv5lj.js"],"IconMark"]
+c:I[39756,["/ocean-flow/_next/static/chunks/0j9iaui0iv5lj.js"],"default"]
+d:I[37457,["/ocean-flow/_next/static/chunks/0j9iaui0iv5lj.js"],"default"]
+11:I[63102,["/ocean-flow/_next/static/chunks/0j9iaui0iv5lj.js"],"default"]
+12:I[25204,["/ocean-flow/_next/static/chunks/0j9iaui0iv5lj.js"],"default"]
+:HL["/ocean-flow/_next/static/chunks/03zo8c0f9nteu.css","style"]
+7:X
+f:X
+f:C
+0:{"buildId":"ldPuzDIvB5iI3vLhX8EAi","data":[{"rsc":["$","$1","c",{"children":[["$","$L2",null,{"id":"oyashio"}],[["$","script","script-0",{"src":"/ocean-flow/_next/static/chunks/3kukjtfb_phuu.js","async":true}],["$","script","script-1",{"src":"/ocean-flow/_next/static/chunks/2e7y3npa7w_zv.js","async":true}]],["$","$L3",null,{"children":["$","$4",null,{"name":"Next.MetadataOutlet","children":"$@5"}]}]]}],"isPartial":"$@6","staleTime":"$7","varyParams":null},{"rsc":["$","$1","h",{"children":[null,["$","$L8",null,{"children":[["$","meta","0",{"charSet":"utf-8"}],["$","meta","1",{"name":"viewport","content":"width=device-width, initial-scale=1"}],["$","meta","2",{"name":"theme-color","content":"#02070f"}]]}],["$","div",null,{"hidden":true,"children":["$","$L9",null,{"children":["$","$4",null,{"name":"Next.Metadata","children":[["$","title","0",{"children":"OCEAN FLOW · 洋流互动实验室"}],["$","meta","1",{"name":"description","content":"高中地理《洋流》互动教学网站：全球洋流地图、洋流形成实验、洋流×大气联动、真实世界案例档案馆与地理实验室。"}],["$","meta","2",{"name":"keywords","content":"洋流,高中地理,暖流,寒流,日本暖流,秘鲁寒流,厄尔尼诺,上升流"}],["$","link","3",{"rel":"icon","href":"/ocean-flow/favicon.ico?favicon.2vob68tjqpejf.ico","sizes":"256x256","type":"image/x-icon"}],["$","link","4",{"rel":"icon","href":"/ocean-flow/icon.svg?icon.0yk_0n1uan73n.svg","sizes":"any","type":"image/svg+xml"}],["$","$La","5",{}]]}]}]}],null]}],"isPartial":"$@b","staleTime":"$7","varyParams":null},{"rsc":["$","$1","c",{"children":[null,["$","$Lc",null,{"parallelRouterKey":"children","template":["$","$Ld",null,{}]}]]}],"isPartial":"$@e","staleTime":"$7","varyParams":"$f"},{"rsc":["$","$1","c",{"children":[null,["$","$Lc",null,{"parallelRouterKey":"children","template":["$","$Ld",null,{}]}]]}],"isPartial":"$@10","staleTime":"$7","varyParams":"$f"},{"rsc":["$","$1","c",{"children":[[["$","link","0",{"rel":"stylesheet","href":"/ocean-flow/_next/static/chunks/03zo8c0f9nteu.css","precedence":"next"}],["$","script","script-0",{"src":"/ocean-flow/_next/static/chunks/0j9iaui0iv5lj.js","async":true}]],["$","html",null,{"lang":"zh-CN","children":["$","body",null,{"className":"grain","style":{"position":"relative"},"children":[["$","div",null,{"aria-hidden":true,"style":{"position":"fixed","inset":0,"zIndex":-2,"pointerEvents":"none","background":"radial-gradient(1100px 700px at 15% -10%, rgba(16, 64, 110, 0.28), transparent 60%),radial-gradient(900px 700px at 90% 110%, rgba(7, 30, 58, 0.55), transparent 60%),linear-gradient(180deg, #02070f, #03101e 55%, #05182c)"}}],["$","$L11",null,{}],["$","main",null,{"className":"min-h-screen","children":["$","$Lc",null,{"parallelRouterKey":"children","template":["$","$Ld",null,{}],"notFound":[[["$","title",null,{"children":"404: This page could not be found."}],["$","div",null,{"style":{"fontFamily":"system-ui,\"Segoe UI\",Roboto,Helvetica,Arial,sans-serif,\"Apple Color Emoji\",\"Segoe UI Emoji\"","height":"100vh","textAlign":"center","display":"flex","flexDirection":"column","alignItems":"center","justifyContent":"center"},"children":["$","div",null,{"children":[["$","style",null,{"dangerouslySetInnerHTML":{"__html":"body{color:#000;background:#fff;margin:0}.next-error-h1{border-right:1px solid rgba(0,0,0,.3)}@media (prefers-color-scheme:dark){body{color:#fff;background:#000}.next-error-h1{border-right:1px solid rgba(255,255,255,.3)}}"}}],["$","h1",null,{"className":"next-error-h1","style":{"display":"inline-block","margin":"0 20px 0 0","padding":"0 23px 0 0","fontSize":24,"fontWeight":500,"verticalAlign":"top","lineHeight":"49px"},"children":404}],["$","div",null,{"style":{"display":"inline-block"},"children":["$","h2",null,{"style":{"fontSize":14,"fontWeight":400,"lineHeight":"49px","margin":0},"children":"This page could not be found."}]}]]}]}]],[]]}]}],["$","$L12",null,{}]]}]}]]}],"isPartial":"$@13","staleTime":"$7","varyParams":null}],"isUpgradeableISRFallback":false,"a":"$@14","rootVaryParams":null,"needsRuntimeRequest":"$@15"}
+5:null
+7:300
+15:true
+7:C
+14:0
+b:"$undefined"
+e:"$undefined"
+10:"$undefined"
+13:"$undefined"
+6:"$undefined"
