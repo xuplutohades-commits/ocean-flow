@@ -2,6 +2,7 @@
 import { asset } from '@/lib/asset';
 import { useEffect, useMemo, useState } from 'react';
 import MonsoonMap from '@/components/map/MonsoonMap';
+import UpwellingProfile from '@/components/monsoon/UpwellingProfile';
 import WalkerCanvas, { type EnsoState } from '@/components/atmosphere/WalkerCanvas';
 import ThreeCellDiagram from '@/components/atmosphere/ThreeCellDiagram';
 import { Panel, Slider, Seg, Reveal } from '@/components/ui/kit';
@@ -64,6 +65,7 @@ export default function AtmospherePage() {
   const { season, setSeason, } = useApp();
   const [anomaly, setAnomaly] = useState(0);
   const [tradeWind, setTradeWind] = useState(70);
+  const [view, setView] = useState<'profile' | 'map'>('profile');
 
   const enso: EnsoState = useMemo(() => ({ anomaly, tradeWind }), [anomaly, tradeWind]);
 
@@ -131,18 +133,33 @@ export default function AtmospherePage() {
         </Reveal>
         <div className="mt-5 grid lg:grid-cols-[1fr_360px] gap-4">
           <div className="rounded-[16px] overflow-hidden border border-[rgba(126,190,255,0.16)] relative h-[480px] md:h-[540px] lg:h-[560px]">
-            <MonsoonMap
-              season={season}
-              className="w-full h-full"
-              style={{ minHeight: 460 }}
-            />
-            <div className="absolute top-3 left-3 flex items-center gap-2 pointer-events-none">
-              <span className="badge" style={{ background: 'rgba(4,14,28,0.78)' }}>动态因果演示：风 → 海水 → 洋流 → 上升流</span>
-              {season === 'summer' ? (
-                <span className="badge badge-cold" style={{ background: 'rgba(4,14,28,0.78)' }}>索马里寒流（上升流·冷蓝水带）</span>
-              ) : (
-                <span className="badge badge-warm" style={{ background: 'rgba(4,14,28,0.78)' }}>索马里暖流（上升流消失）</span>
-              )}
+            {view === 'profile' ? (
+              <UpwellingProfile season={season} className="w-full h-full" style={{ minHeight: 460 }} />
+            ) : (
+              <MonsoonMap
+                season={season}
+                className="w-full h-full"
+                style={{ minHeight: 460 }}
+              />
+            )}
+            <div className="absolute top-3 left-3 right-3 flex items-center justify-between gap-2 pointer-events-none">
+              <div className="flex items-center gap-2 flex-wrap">
+                <span className="badge" style={{ background: 'rgba(4,14,28,0.78)' }}>
+                  {view === 'profile' ? '分步演示 · 垂直剖面：风 → 表层海水 → 上升流' : '动态因果演示：风 → 海水 → 洋流 → 上升流'}
+                </span>
+                {season === 'summer' ? (
+                  <span className="badge badge-cold" style={{ background: 'rgba(4,14,28,0.78)' }}>索马里寒流（上升流·冷蓝水带）</span>
+                ) : (
+                  <span className="badge badge-warm" style={{ background: 'rgba(4,14,28,0.78)' }}>索马里暖流（上升流消失）</span>
+                )}
+              </div>
+              <div className="pointer-events-auto">
+                <Seg<'profile' | 'map'>
+                  options={[{ id: 'profile', label: '垂直剖面' }, { id: 'map', label: '平面地图' }]}
+                  value={view}
+                  onChange={setView}
+                />
+              </div>
             </div>
             <div className="absolute bottom-3 left-3 pointer-events-auto">
               <Seg<Season>
