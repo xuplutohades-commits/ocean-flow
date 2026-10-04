@@ -14,14 +14,18 @@ const ENSO_PRESETS = [
   { label: '拉尼娜', anomaly: -2.2, tradeWind: 92 },
 ];
 
-function MonsoonSchematic({ season }: { season: Season }) {
+function MonsoonSchematic({ season, onSelect }: { season: Season; onSelect: (s: Season) => void }) {
   const summer = season === 'summer';
   return (
     <div className="grid sm:grid-cols-2 gap-3">
-      {[summer ? 'summer' : 'winter', summer ? 'winter' : 'summer'].map((s) => {
+      {([summer ? 'summer' : 'winter', summer ? 'winter' : 'summer'] as Season[]).map((s) => {
         const isSummerShown = s === 'summer';
+        const active = s === season;
         return (
-          <div key={s} className={`rounded-[12px] border p-4 transition-opacity ${isSummerShown !== summer ? 'opacity-35' : ''}`}
+          <button key={s} type="button"
+            onClick={() => onSelect(s)}
+            title={active ? `当前：${s === 'summer' ? '夏季' : '冬季'}` : `点击切换为${s === 'summer' ? '夏季' : '冬季'}`}
+            className={`rounded-[12px] border p-4 text-left transition-all ${active ? 'cursor-default' : 'cursor-pointer hover:brightness-125 hover:scale-[1.015] active:scale-[0.99]'} ${active ? '' : 'opacity-35'} focus:outline-none focus-visible:ring-2 focus-visible:ring-[#7fd4ff]/60`}
             style={{ borderColor: isSummerShown ? 'rgba(255,157,92,0.35)' : 'rgba(94,200,255,0.3)', background: 'rgba(8,22,40,0.5)' }}>
             <div className="text-[13px] font-bold" style={{ color: isSummerShown ? '#ffd9ae' : '#bde6ff' }}>
               {isSummerShown ? '夏季：大陆低压' : '冬季：大陆高压'}
@@ -46,7 +50,10 @@ function MonsoonSchematic({ season }: { season: Season }) {
                 {isSummerShown ? '风从海洋吹向大陆（西南季风）' : '风从大陆吹向海洋（东北季风）'}
               </text>
             </svg>
-          </div>
+            <div className={`mt-2 text-center text-[10px] ${active ? 'text-[#5f7b99]' : 'text-[#7fa3c4]'}`}>
+              {active ? '✓ 当前季节' : (isSummerShown ? '点击切换到夏季' : '点击切换到冬季')}
+            </div>
+          </button>
         );
       })}
     </div>
@@ -148,7 +155,7 @@ export default function AtmospherePage() {
           <div className="space-y-4">
             <Panel className="p-5">
               <div className="kicker text-[10px]">WHY DOES MONSOON FLIP · 季风为什么会反转</div>
-              <div className="mt-3"><MonsoonSchematic season={season} /></div>
+              <div className="mt-3"><MonsoonSchematic season={season} onSelect={setSeason} /></div>
               <div className="mt-3 space-y-2 text-[12px] leading-relaxed text-[#a9c3de]">
                 {season === 'summer' ? (
                   <>

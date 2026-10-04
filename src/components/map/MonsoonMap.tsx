@@ -24,16 +24,18 @@ const LAT1 = 43;
 type Pt = [number, number];
 
 const TAG_WIND   = { lng: 66, lat: 20, summer: '西南季风', winter: '东北季风' };
-const TAG_SOMALI = { lng: 51.3, lat: 2.8, text: '索马里洋流' };
-const TAG_UPWELL = { lng: 48.6, lat: 12.4, summer: '沿岸上升流', winter: '上升流停止' };
+const TAG_SOMALI = { lng: 49.4, lat: 5.4, text: '索马里洋流' };
+const TAG_UPWELL = { lng: 50.6, lat: 7.8, summer: '沿岸上升流', winter: '上升流停止' };
 
-/* ── 索马里海岸线（洋流带的位置依据） ── */
-const SOMALI_SUMMER: Pt[] = [
-  [50.5, -3], [48.8, 0.5], [47.5, 4], [46.2, 7.5], [44.8, 10.5], [43.5, 12.5],
+/* ── 索马里海岸线（洋流带的位置依据） ──
+   这条多段线按 land.json 实际渲染的海岸对齐（0.5° 纬度采样），
+   并整体向海侧（东）偏移约 0.4°，确保洋流带/上升流粒子始终在海上。 */
+const SOMALI_COAST: Pt[] = [
+  [40.6, -3], [41.9, -1.2], [43.7, 0.8], [45.9, 2.5], [47.9, 4.2],
+  [49.3, 6], [50.4, 7.9], [51.2, 9.6], [51.6, 11],
 ];
-const SOMALI_WINTER: Pt[] = [
-  [43.5, 12.5], [45, 9], [46.8, 5.5], [48.2, 2], [49.5, -1.5], [50.5, -3],
-];
+const SOMALI_SUMMER: Pt[] = SOMALI_COAST;
+const SOMALI_WINTER: Pt[] = [...SOMALI_COAST].reverse();
 
 /* ── 风箭头锚点：稀疏、分布在北印度洋海面 ── */
 const WIND_ANCHORS: Pt[] = [
@@ -86,10 +88,16 @@ function somaliBandAt(lng: number, lat: number, t: number): number {
   return Math.exp(-(d * d) / (0.55 * 0.55));
 }
 
+/** 上升流中心线经度：随纬度沿海岸向东北（中心线在海岸以东约 0.3°，海上） */
+function upwellCenterLng(lat: number): number {
+  const along = clamp((lat - 3.2) / 7.3, 0, 1);
+  return 47.1 + along * 4.1;
+}
+
 /** 沿岸上升流权重：夏季强、冬季弱 */
 function upwellWeightAt(lng: number, lat: number, t: number): number {
-  const along = clamp((lat - 3.2) / 8.5, 0, 1);
-  const lateral = Math.exp(-(((lng - (46.2 + along * -0.6)) / 1.3) ** 2));
+  const along = clamp((lat - 3.2) / 7.3, 0, 1);
+  const lateral = Math.exp(-(((lng - upwellCenterLng(lat)) / 1.35) ** 2));
   const vertical = Math.sin(along * Math.PI);
   return lateral * vertical * Math.pow(1 - t, 1.4);
 }
@@ -346,16 +354,16 @@ class MonsoonEngine {
         if (!this.isSea(lng, lat)) continue;
         return { lng, lat, age: Math.random() * 4, life: 6 + Math.random() * 6, seed: Math.random() * 100, kind, speed: 0.75 + Math.random() * 0.9 };
       }
-      return { lng: 47, lat: 4, age: 0, life: 7, seed: Math.random() * 100, kind, speed: 0.8 };
+      return { lng: 48.9, lat: 5.5, age: 0, life: 7, seed: Math.random() * 100, kind, speed: 0.8 };
     }
     for (let tries = 0; tries < 30; tries++) {
-      const lat = 3 + Math.random() * 9;
-      const lng = 44.5 + Math.random() * 5;
+      const lat = 3.2 + Math.random() * 7.3;
+      const lng = upwellCenterLng(lat) + (Math.random() - 0.5) * 2.4;
       if (upwellWeightAt(lng, lat, 0) < 0.12) continue;
       if (!this.isSea(lng, lat)) continue;
       return { lng, lat, age: Math.random() * 4, life: 7 + Math.random() * 7, seed: Math.random() * 100, kind, speed: 0.5 + Math.random() * 0.8 };
     }
-    return { lng: 46.5, lat: 6, age: 0, life: 8, seed: Math.random() * 100, kind, speed: 0.6 };
+    return { lng: 50.6, lat: 8.5, age: 0, life: 8, seed: Math.random() * 100, kind, speed: 0.6 };
   }
 
   /* ── 主循环：四层按序绘制 ── */
@@ -401,11 +409,11 @@ class MonsoonEngine {
     const teachK = this.season === 'summer' ? smoothstep(0.72, 1.0, this.phase) : 1;
     const k = Math.pow(1 - this.t, 1.5) * teachK;
     if (k < 0.02) return;
-    // 海面冷色带（沿岸局部）
-    const gy1 = this.proj(46.2, 3.6)[1];
-    const gy0 = this.proj(46.6, 10.8)[1];
-    const cx = this.proj(46.35, 7.2)[0];
-    const cy = this.proj(46.35, 7.2)[1];
+    // 海面冷色带（沿岸局部，随中心线移动）
+    const gy1 = this.proj(upwellCenterLng(3.4), 3.4)[1];
+    const gy0 = this.proj(upwellCenterLng(10.2), 10.2)[1];
+    const cx = this.proj(upwellCenterLng(7), 7)[0];
+    const cy = this.proj(upwellCenterLng(7), 7)[1];
     const rg = ctx.createRadialGradient(cx, cy, 0, cx, cy, Math.abs(gy1 - gy0) * 0.62);
     rg.addColorStop(0, `rgba(70, 165, 230, ${0.16 * k})`);
     rg.addColorStop(0.5, `rgba(45, 135, 210, ${0.10 * k})`);
@@ -474,6 +482,7 @@ class MonsoonEngine {
       p.age += dt;
       if (p.age > p.life) { this.ps[i] = this.spawn(p.kind); continue; }
       if (p.lng < LNG0 || p.lng > LNG1 || p.lat < LAT0 || p.lat > LAT1) { this.ps[i] = this.spawn(p.kind); continue; }
+      if (!this.isSea(p.lng, p.lat)) { this.ps[i] = this.spawn(p.kind); continue; }
 
       const fadeIn = clamp(p.age / 1.6, 0, 1);
       const fadeOut = clamp((p.life - p.age) / 2.6, 0, 1);

@@ -71,6 +71,15 @@ export default function WalkerCanvas({ state }: { state: EnsoState }) {
       const ySurf = h * 0.62;
       const yTop = h * 0.12;
       const yMid = h * 0.37;
+      // 垂直对流柱/环流顶高：与秘鲁上升流同一强度因子联动。
+      // 正常年信风越强上升柱越高（满风 ≈ 顶部）；信风弱则环流被压平；
+      // 厄尔尼诺/反转时环流塌陷，只在洋面附近残留一个矮柱。
+      const upwellK = reversed ? 0.06 : trade * 0.9;
+      const riseK = reversed
+        ? 0.30 * (1 - loopStrength)
+        : clamp((upwellK - 0.08) / 0.55, 0, 1);
+      const yLoopTop = lerp(ySurf - 10, yTop, riseK);
+      const colH = ySurf - yLoopTop;
 
       ctx.clearRect(0, 0, w, h);
 
@@ -119,13 +128,14 @@ export default function WalkerCanvas({ state }: { state: EnsoState }) {
       const sinkX = riseWest ? xE : xW;
       const riseCol = riseWest ? 'rgba(255,157,92,0.22)' : 'rgba(255,157,92,0.30)';
       const sinkCol = riseWest ? 'rgba(94,200,255,0.14)' : 'rgba(94,200,255,0.22)';
+      const riseCy = (ySurf + yLoopTop) / 2;
       ctx.fillStyle = riseCol;
       ctx.beginPath();
-      ctx.ellipse(riseX, yMid, 46, ySurf - yTop, 0, 0, Math.PI * 2);
+      ctx.ellipse(riseX, riseCy, 46, colH / 2, 0, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillStyle = sinkCol;
       ctx.beginPath();
-      ctx.ellipse(sinkX, yMid, 42, ySurf - yTop, 0, 0, Math.PI * 2);
+      ctx.ellipse(sinkX, riseCy + (ySurf - yTop) * 0.12, 42, colH / 2, 0, 0, Math.PI * 2);
       ctx.fill();
 
       // 信风箭头（洋面）
@@ -184,15 +194,15 @@ export default function WalkerCanvas({ state }: { state: EnsoState }) {
         if (riseWest) {
           // 正常：洋面自东向西 → 西侧上升 → 高空自西向东 → 东侧下沉
           if (t < 0.4) { const k = t / 0.4; px = lerp(xE, xW, k); py = ySurf + 6; }
-          else if (t < 0.55) { const k = (t - 0.4) / 0.15; px = xW; py = lerp(ySurf + 6, yTop, k); }
-          else if (t < 0.9) { const k = (t - 0.55) / 0.35; px = lerp(xW, xE, k); py = yTop + 8 * Math.sin(k * Math.PI); }
-          else { const k = (t - 0.9) / 0.1; px = xE; py = lerp(yTop, ySurf - 4, k); }
+          else if (t < 0.55) { const k = (t - 0.4) / 0.15; px = xW; py = lerp(ySurf + 6, yLoopTop, k); }
+          else if (t < 0.9) { const k = (t - 0.55) / 0.35; px = lerp(xW, xE, k); py = yLoopTop + 8 * Math.sin(k * Math.PI); }
+          else { const k = (t - 0.9) / 0.1; px = xE; py = lerp(yLoopTop, ySurf - 4, k); }
         } else {
           // 厄尔尼诺：反向环流
           if (t < 0.4) { const k = t / 0.4; px = lerp(xW, xE, k); py = ySurf + 6; }
-          else if (t < 0.55) { const k = (t - 0.4) / 0.15; px = xE; py = lerp(ySurf + 6, yTop, k); }
-          else if (t < 0.9) { const k = (t - 0.55) / 0.35; px = lerp(xE, xW, k); py = yTop + 8 * Math.sin(k * Math.PI); }
-          else { const k = (t - 0.9) / 0.1; px = xW; py = lerp(yTop, ySurf - 4, k); }
+          else if (t < 0.55) { const k = (t - 0.4) / 0.15; px = xE; py = lerp(ySurf + 6, yLoopTop, k); }
+          else if (t < 0.9) { const k = (t - 0.55) / 0.35; px = lerp(xE, xW, k); py = yLoopTop + 8 * Math.sin(k * Math.PI); }
+          else { const k = (t - 0.9) / 0.1; px = xW; py = lerp(yLoopTop, ySurf - 4, k); }
         }
         const wob = Math.sin(T * 2 + d.seed) * 2;
         ctx.fillStyle = `rgba(240, 214, 170, ${0.35 + 0.5 * loopStrength})`;
@@ -209,7 +219,7 @@ export default function WalkerCanvas({ state }: { state: EnsoState }) {
       ctx.fillText(`东太平洋 ${sstE.toFixed(1)} ℃`, xE - 90, ySurf + 46);
       ctx.font = '500 10px sans-serif';
       ctx.fillStyle = 'rgba(150,190,220,0.75)';
-      ctx.fillText(reversed ? '对流移到东太：东太多雨，西太干旱' : '西太对流旺盛：印尼多雨，东太干旱（副热带高压）', lerp(xW, xE, 0.5) - 130, yTop - 8);
+      ctx.fillText(reversed ? '对流移到东太：东太多雨，西太干旱' : '西太对流旺盛：印尼多雨，东太干旱（副热带高压）', lerp(xW, xE, 0.5) - 130, yLoopTop - 8);
 
       raf = requestAnimationFrame(frame);
     };
